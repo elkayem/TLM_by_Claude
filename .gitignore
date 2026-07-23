@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# generated/downloaded data and trained weights - regenerate via
+# data/prepare_shakespeare.py and data/prepare_stories.py, and
+# python -m tlm.train
+data/*
+!data/prepare_shakespeare.py
+!data/prepare_stories.py
+checkpoints/
