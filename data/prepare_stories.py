@@ -49,9 +49,9 @@ BPE_SAMPLE_BYTES = 10 * 1024 * 1024   # train BPE on the first 10MB
 CHUNK_CHARS = 4 * 1024 * 1024         # encode in 4M-char chunks
 
 
-def download(url, path):
-    """Download with resume: if a partial file exists, ask the server for
-    the remaining bytes only (HTTP Range header)."""
+def _download_attempt(url, path):
+    """One download attempt with resume: if a partial file exists, ask the
+    server for only the remaining bytes (HTTP Range header)."""
     done = os.path.getsize(path) if os.path.exists(path) else 0
     headers = {"Range": f"bytes={done}-"} if done else {}
     with requests.get(url, headers=headers, stream=True, timeout=60) as r:
@@ -59,6 +59,8 @@ def download(url, path):
             return
         r.raise_for_status()
         total = int(r.headers.get("content-length", 0)) + done
+        # 206 = server honored the Range request, so append; anything else
+        # means it sent the whole file again, so start over.
         mode = "ab" if done and r.status_code == 206 else "wb"
         t0 = time.time()
         with open(path, mode) as f:
@@ -70,6 +72,23 @@ def download(url, path):
                     print(f"  {done/1e6:,.0f}MB / {total/1e6:,.0f}MB "
                           f"({pct:.0f}%)", flush=True)
                     t0 = time.time()
+
+
+def download(url, path, max_retries=30):
+    """Download with automatic retry. A dropped connection mid-download
+    (common on a ~2GB file) just triggers another attempt, and because
+    each attempt resumes from the bytes already on disk, no progress is
+    ever lost."""
+    for attempt in range(1, max_retries + 1):
+        try:
+            _download_attempt(url, path)
+            return
+        except requests.exceptions.RequestException as e:
+            print(f"  connection dropped ({type(e).__name__}); "
+                  f"resuming in 10s (attempt {attempt}/{max_retries})",
+                  flush=True)
+            time.sleep(10)
+    raise RuntimeError(f"download failed after {max_retries} attempts: {url}")
 
 
 def encode_file(tokenizer, txt_path, bin_path):
