@@ -116,7 +116,15 @@ def estimate_loss(model, splits, config, generator):
     return out
 
 
-def save_checkpoint(path, model, optimizer, step, config, best_val):
+def fmt_hms(seconds):
+    """Format an elapsed duration as H:MM:SS (e.g. 2:07:34)."""
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h}:{m:02d}:{s:02d}"
+
+
+def save_checkpoint(path, model, optimizer, step, config, best_val, elapsed):
     """Atomic checkpoint save: write to a temp file, then rename over the
     old one. If the machine dies mid-write we keep the previous good
     checkpoint instead of a corrupt half-file. (Also plays nicer with
@@ -131,6 +139,8 @@ def save_checkpoint(path, model, optimizer, step, config, best_val):
         "step": step,
         "best_val": best_val,
         "config": config.to_dict(),
+        "elapsed": elapsed,   # cumulative training seconds across all
+                              # sessions, so --resume continues the clock
     }, tmp)
     os.replace(tmp, path)
 
@@ -194,12 +204,15 @@ def main():
     log_path = os.path.join(ckpt_dir, "log.csv")
 
     start_step, best_val = 0, float("inf")
+    elapsed_before = 0.0   # training time accumulated in previous sessions
     if args.resume and os.path.exists(ckpt_path):
         ckpt = torch.load(ckpt_path, weights_only=True)
         model.load_state_dict(ckpt["model"])
         optimizer.load_state_dict(ckpt["optimizer"])
         start_step, best_val = ckpt["step"] + 1, ckpt["best_val"]
-        print(f"resumed from step {start_step}")
+        elapsed_before = ckpt.get("elapsed", 0.0)
+        print(f"resumed from step {start_step} "
+              f"(prior training time {fmt_hms(elapsed_before)})")
     elif not args.resume and os.path.exists(ckpt_path):
         raise SystemExit(
             f"checkpoint already exists at {ckpt_path}; "
@@ -212,7 +225,11 @@ def main():
 
     # ---- the loop
     model.train()
+    # t0 measures throughput between eval prints (it resets each time);
+    # session_start measures this process's wall time, which we add to
+    # elapsed_before to get cumulative training time across resumes.
     t0, tokens_since = time.time(), 0
+    session_start = time.time()
     for step in range(start_step, config.max_steps):
         # set this step's learning rate on every param group
         lr = get_lr(step, config)
@@ -242,9 +259,10 @@ def main():
             losses = estimate_loss(model, splits, config, generator)
             dt = time.time() - t0
             tps = tokens_since / dt if dt > 0 else 0.0
+            elapsed = elapsed_before + (time.time() - session_start)
             print(f"step {step:6d} | lr {lr:.2e} | "
                   f"train {losses['train']:.4f} | val {losses['val']:.4f} | "
-                  f"{tps:,.0f} tok/s")
+                  f"{tps:,.0f} tok/s | elapsed {fmt_hms(elapsed)}")
             with open(log_path, "a", newline="") as f:
                 csv.writer(f).writerow(
                     [step, f"{lr:.2e}", f"{losses['train']:.4f}",
@@ -254,7 +272,7 @@ def main():
             if losses["val"] < best_val:
                 best_val = losses["val"]
                 save_checkpoint(best_path, model, optimizer, step, config,
-                                best_val)
+                                best_val, elapsed)
 
         # ---- periodic sample: watch the model learn to write
         if step > 0 and step % config.sample_interval == 0:
@@ -267,12 +285,15 @@ def main():
             print("-" * 60)
 
         if step > 0 and step % config.checkpoint_interval == 0:
+            elapsed = elapsed_before + (time.time() - session_start)
             save_checkpoint(ckpt_path, model, optimizer, step, config,
-                            best_val)
+                            best_val, elapsed)
 
+    elapsed = elapsed_before + (time.time() - session_start)
     save_checkpoint(ckpt_path, model, optimizer, config.max_steps - 1,
-                    config, best_val)
+                    config, best_val, elapsed)
     print(f"done. best val loss {best_val:.4f}. "
+          f"total training time {fmt_hms(elapsed)}. "
           f"checkpoints in {ckpt_dir}")
 
 
