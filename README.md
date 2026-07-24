@@ -49,7 +49,9 @@ the best validation loss so far.
 
 ## The guided tour (docs/)
 
-Read in order, next to the code file each chapter covers:
+Start with the [architecture figure](docs/architecture.svg) — the whole
+model on one page, from token ids down to the causal attention matrix.
+Then read in order, next to the code file each chapter covers:
 
 1. [00-overview.md](docs/00-overview.md) — the big picture: what a language model is
 2. [01-tokenization.md](docs/01-tokenization.md) — text → integers (`tokenizer.py`)

@@ -1,0 +1,255 @@
+<svg viewBox="0 0 1180 840" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif">
+  <!-- =====================================================================
+       TLM architecture figure. Three panels, zooming in left to right:
+         1. the full model (TLM)          - everything from text to logits
+         2. one transformer block (Block) - the repeated unit
+         3. causal self-attention         - the heart, with the T x T matrix
+       Dimensions annotated are the 'stories' config (n_embd=256, 8 heads,
+       8 layers, vocab 4096); the table bottom-left gives both configs.
+       ===================================================================== -->
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/>
+    </marker>
+    <marker id="arrowzoom" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f97316"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1180" height="840" fill="#ffffff"/>
+
+  <!-- panel dividers -->
+  <line x1="325" y1="20" x2="325" y2="820" stroke="#e5e7eb" stroke-width="1.5"/>
+  <line x1="685" y1="20" x2="685" y2="820" stroke="#e5e7eb" stroke-width="1.5"/>
+
+  <!-- ============================ PANEL 1: full model ==================== -->
+  <text x="155" y="32" text-anchor="middle" font-size="15" font-weight="bold" fill="#111827">The full model</text>
+  <text x="155" y="48" text-anchor="middle" font-size="11" fill="#6b7280">model.py: class TLM</text>
+
+  <text x="155" y="72" text-anchor="middle" font-size="13" font-style="italic" fill="#111827">&#8220;Once upon a&#8221;</text>
+  <line x1="155" y1="78" x2="155" y2="90" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- tokenizer (outside the network) -->
+  <rect x="40" y="92" width="230" height="28" rx="5" fill="none" stroke="#9ca3af" stroke-dasharray="5 3"/>
+  <text x="155" y="110" text-anchor="middle" font-size="12" fill="#4b5563">tokenizer  (not part of the network)</text>
+  <line x1="155" y1="120" x2="155" y2="132" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- token ids -->
+  <rect x="40" y="134" width="230" height="38" rx="5" fill="#f3f4f6" stroke="#6b7280"/>
+  <text x="155" y="150" text-anchor="middle" font-size="12" font-family="Consolas, monospace" fill="#111827">[432, 1287, 261]</text>
+  <text x="155" y="165" text-anchor="middle" font-size="11" fill="#4b5563">token ids &#8212; shape (B, T)</text>
+  <line x1="155" y1="172" x2="155" y2="184" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- embeddings -->
+  <rect x="40" y="186" width="230" height="86" rx="6" fill="#eff6ff" stroke="#3b82f6"/>
+  <rect x="52" y="194" width="206" height="26" rx="4" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="155" y="211" text-anchor="middle" font-size="11.5" fill="#111827">token embedding  (4096 &#215; 256)</text>
+  <text x="155" y="235" text-anchor="middle" font-size="14" font-weight="bold" fill="#3b82f6">+</text>
+  <rect x="52" y="240" width="206" height="26" rx="4" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="155" y="257" text-anchor="middle" font-size="11.5" fill="#111827">position embedding  (256 &#215; 256)</text>
+  <line x1="155" y1="272" x2="155" y2="286" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="163" y="283" font-size="10.5" fill="#6b7280">(B, T, 256)</text>
+
+  <!-- dropout -->
+  <rect x="40" y="288" width="230" height="24" rx="5" fill="#f3f4f6" stroke="#6b7280"/>
+  <text x="155" y="304" text-anchor="middle" font-size="11.5" fill="#4b5563">dropout</text>
+  <line x1="155" y1="312" x2="155" y2="326" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- block stack -->
+  <rect x="66" y="342" width="230" height="96" rx="6" fill="#fef9c3" stroke="#ca8a04" opacity="0.45"/>
+  <rect x="53" y="335" width="230" height="96" rx="6" fill="#fef9c3" stroke="#ca8a04" opacity="0.7"/>
+  <rect x="40" y="328" width="230" height="96" rx="6" fill="#fef9c3" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="155" y="358" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#111827">Transformer Block &#215; 8</text>
+  <text x="155" y="378" text-anchor="middle" font-size="11.5" fill="#4b5563">attention + MLP,</text>
+  <text x="155" y="393" text-anchor="middle" font-size="11.5" fill="#4b5563">each output feeds the next</text>
+  <text x="155" y="412" text-anchor="middle" font-size="11" font-style="italic" fill="#ca8a04">zoom: middle panel &#8594;</text>
+  <line x1="155" y1="440" x2="155" y2="454" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- final layernorm -->
+  <rect x="40" y="456" width="230" height="26" rx="5" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="155" y="473" text-anchor="middle" font-size="11.5" fill="#111827">LayerNorm  (ln_f)</text>
+  <line x1="155" y1="482" x2="155" y2="496" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- lm head -->
+  <rect x="40" y="498" width="230" height="40" rx="5" fill="#dbeafe" stroke="#3b82f6"/>
+  <text x="155" y="514" text-anchor="middle" font-size="11.5" fill="#111827">lm_head:  Linear 256 &#8594; 4096</text>
+  <text x="155" y="530" text-anchor="middle" font-size="10.5" font-style="italic" fill="#4b5563">weights tied with token embedding</text>
+  <!-- tied-weights dashed link -->
+  <path d="M 40 518 C 18 518 18 207 40 207" fill="none" stroke="#64748b" stroke-dasharray="4 3"/>
+  <text x="14" y="380" font-size="10" fill="#64748b" transform="rotate(-90 14 380)" text-anchor="middle">tied weights</text>
+  <line x1="155" y1="538" x2="155" y2="552" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- logits -->
+  <rect x="40" y="554" width="230" height="26" rx="5" fill="#f3f4f6" stroke="#6b7280"/>
+  <text x="155" y="571" text-anchor="middle" font-size="11.5" fill="#111827">logits &#8212; shape (B, T, 4096)</text>
+  <line x1="100" y1="580" x2="100" y2="594" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="210" y1="580" x2="210" y2="642" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- training / generation -->
+  <rect x="40" y="596" width="230" height="38" rx="5" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="155" y="611" text-anchor="middle" font-size="11.5" fill="#111827">training:  cross-entropy loss</text>
+  <text x="155" y="626" text-anchor="middle" font-size="11" fill="#4b5563">vs. the actual next token</text>
+  <rect x="40" y="644" width="230" height="38" rx="5" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="155" y="659" text-anchor="middle" font-size="11.5" fill="#111827">generation:  softmax &#8594; sample</text>
+  <text x="155" y="674" text-anchor="middle" font-size="11" fill="#4b5563">&#8594; append to context &#8594; repeat</text>
+
+  <!-- config table -->
+  <rect x="40" y="700" width="230" height="122" rx="6" fill="#f9fafb" stroke="#d1d5db"/>
+  <text x="60" y="717" font-size="11" font-weight="bold" fill="#111827">config</text>
+  <text x="175" y="717" font-size="11" font-weight="bold" text-anchor="end" fill="#111827">shakespeare</text>
+  <text x="250" y="717" font-size="11" font-weight="bold" text-anchor="end" fill="#111827">stories</text>
+  <line x1="50" y1="723" x2="260" y2="723" stroke="#d1d5db"/>
+  <text x="60" y="737" font-size="11" fill="#4b5563">layers</text>
+  <text x="175" y="737" font-size="11" text-anchor="end" fill="#111827">6</text>
+  <text x="250" y="737" font-size="11" text-anchor="end" fill="#111827">8</text>
+  <text x="60" y="751" font-size="11" fill="#4b5563">heads</text>
+  <text x="175" y="751" font-size="11" text-anchor="end" fill="#111827">6 &#215; 32</text>
+  <text x="250" y="751" font-size="11" text-anchor="end" fill="#111827">8 &#215; 32</text>
+  <text x="60" y="765" font-size="11" fill="#4b5563">width (n_embd)</text>
+  <text x="175" y="765" font-size="11" text-anchor="end" fill="#111827">192</text>
+  <text x="250" y="765" font-size="11" text-anchor="end" fill="#111827">256</text>
+  <text x="60" y="779" font-size="11" fill="#4b5563">context (block)</text>
+  <text x="175" y="779" font-size="11" text-anchor="end" fill="#111827">256</text>
+  <text x="250" y="779" font-size="11" text-anchor="end" fill="#111827">256</text>
+  <text x="60" y="793" font-size="11" fill="#4b5563">vocab</text>
+  <text x="175" y="793" font-size="11" text-anchor="end" fill="#111827">65</text>
+  <text x="250" y="793" font-size="11" text-anchor="end" fill="#111827">4096</text>
+  <text x="60" y="807" font-size="11" fill="#4b5563">parameters</text>
+  <text x="175" y="807" font-size="11" text-anchor="end" fill="#111827">2.68M</text>
+  <text x="250" y="807" font-size="11" text-anchor="end" fill="#111827">7.37M</text>
+
+  <!-- ============================ PANEL 2: one block ===================== -->
+  <text x="500" y="32" text-anchor="middle" font-size="15" font-weight="bold" fill="#111827">Inside one Block</text>
+  <text x="500" y="48" text-anchor="middle" font-size="11" fill="#6b7280">model.py: class Block &#8212; figure shows the stories config</text>
+
+  <text x="408" y="72" font-size="11" fill="#4b5563">x from below &#8212; (B, T, 256)</text>
+  <!-- residual stream -->
+  <line x1="400" y1="78" x2="400" y2="600" stroke="#111827" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="388" y="340" font-size="10.5" fill="#6b7280" transform="rotate(-90 388 340)" text-anchor="middle">residual stream: only additions, end to end</text>
+
+  <!-- branch 1: attention -->
+  <line x1="400" y1="120" x2="448" y2="120" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="450" y="106" width="200" height="28" rx="5" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="550" y="124" text-anchor="middle" font-size="11.5" fill="#111827">LayerNorm  (ln1)</text>
+  <line x1="550" y1="134" x2="550" y2="148" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="450" y="150" width="200" height="64" rx="5" fill="#ffedd5" stroke="#f97316" stroke-width="1.5"/>
+  <text x="550" y="171" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#111827">causal self-attention</text>
+  <text x="550" y="188" text-anchor="middle" font-size="11" fill="#4b5563">8 heads &#215; 32 dims each</text>
+  <text x="550" y="204" text-anchor="middle" font-size="10.5" font-style="italic" fill="#f97316">zoom: right panel &#8594;</text>
+  <path d="M 450 214 L 420 240 L 412 246" fill="none" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <circle cx="400" cy="252" r="11" fill="#ffffff" stroke="#111827" stroke-width="2"/>
+  <text x="400" y="257" text-anchor="middle" font-size="14" font-weight="bold" fill="#111827">+</text>
+  <text x="420" y="276" font-size="11" font-family="Consolas, monospace" fill="#111827">x = x + attn(ln1(x))</text>
+  <text x="420" y="291" font-size="10.5" font-style="italic" fill="#6b7280">communicate: positions exchange information</text>
+
+  <!-- branch 2: MLP -->
+  <line x1="400" y1="322" x2="448" y2="322" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="450" y="308" width="200" height="28" rx="5" fill="#ede9fe" stroke="#8b5cf6"/>
+  <text x="550" y="326" text-anchor="middle" font-size="11.5" fill="#111827">LayerNorm  (ln2)</text>
+  <line x1="550" y1="336" x2="550" y2="350" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="450" y="352" width="200" height="128" rx="5" fill="#f0fdf4" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="640" y="368" text-anchor="end" font-size="11" font-weight="bold" fill="#22c55e">MLP</text>
+  <rect x="465" y="374" width="170" height="26" rx="4" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="550" y="391" text-anchor="middle" font-size="11" fill="#111827">Linear 256 &#8594; 1024</text>
+  <rect x="465" y="408" width="170" height="24" rx="4" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="550" y="424" text-anchor="middle" font-size="11" fill="#111827">GELU</text>
+  <rect x="465" y="440" width="170" height="26" rx="4" fill="#dcfce7" stroke="#22c55e"/>
+  <text x="550" y="457" text-anchor="middle" font-size="11" fill="#111827">Linear 1024 &#8594; 256</text>
+  <path d="M 450 480 L 420 506 L 412 512" fill="none" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <circle cx="400" cy="518" r="11" fill="#ffffff" stroke="#111827" stroke-width="2"/>
+  <text x="400" y="523" text-anchor="middle" font-size="14" font-weight="bold" fill="#111827">+</text>
+  <text x="420" y="542" font-size="11" font-family="Consolas, monospace" fill="#111827">x = x + mlp(ln2(x))</text>
+  <text x="420" y="557" font-size="10.5" font-style="italic" fill="#6b7280">compute: each position thinks independently</text>
+
+  <text x="408" y="596" font-size="11" fill="#4b5563">x out &#8212; (B, T, 256) &#8594; next block</text>
+
+  <text x="500" y="632" text-anchor="middle" font-size="11" fill="#6b7280">note: sub-layers only ever ADD to x &#8212; the stream itself</text>
+  <text x="500" y="647" text-anchor="middle" font-size="11" fill="#6b7280">is never overwritten (why deep stacks train at all)</text>
+
+  <!-- zoom arrow to panel 3 -->
+  <line x1="652" y1="182" x2="698" y2="182" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrowzoom)"/>
+
+  <!-- ============================ PANEL 3: attention ===================== -->
+  <text x="930" y="32" text-anchor="middle" font-size="15" font-weight="bold" fill="#111827">Inside causal self-attention</text>
+  <text x="930" y="48" text-anchor="middle" font-size="11" fill="#6b7280">model.py: class CausalSelfAttention</text>
+
+  <text x="930" y="70" text-anchor="middle" font-size="11.5" fill="#111827">input x &#8212; (B, T, 256)</text>
+  <line x1="930" y1="76" x2="930" y2="88" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="780" y="90" width="300" height="28" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="930" y="108" text-anchor="middle" font-size="11.5" fill="#111827">qkv_proj:  Linear 256 &#8594; 768</text>
+  <text x="930" y="133" text-anchor="middle" font-size="10.5" fill="#6b7280">split 3 ways, then into 8 heads of 32 dims</text>
+
+  <line x1="850" y1="118" x2="812 " y2="140" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="930" y1="118" x2="930" y2="140" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="1010" y1="118" x2="1048" y2="140" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="762" y="142" width="100" height="42" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="812" y="160" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#111827">q  &#8220;seeking?&#8221;</text>
+  <text x="812" y="176" text-anchor="middle" font-size="9.5" fill="#6b7280">(B, 8, T, 32)</text>
+  <rect x="880" y="142" width="100" height="42" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="930" y="160" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#111827">k  &#8220;contains?&#8221;</text>
+  <text x="930" y="176" text-anchor="middle" font-size="9.5" fill="#6b7280">(B, 8, T, 32)</text>
+  <rect x="998" y="142" width="100" height="42" rx="5" fill="#fef3c7" stroke="#d97706"/>
+  <text x="1048" y="160" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#111827">v  &#8220;delivers&#8221;</text>
+  <text x="1048" y="176" text-anchor="middle" font-size="9.5" fill="#6b7280">(B, 8, T, 32)</text>
+
+  <line x1="812" y1="184" x2="856" y2="212" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="930" y1="184" x2="904" y2="212" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="760" y="214" width="240" height="30" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="880" y="234" text-anchor="middle" font-size="11.5" font-family="Consolas, monospace" fill="#111827">scores = q &#183; k<tspan font-size="9" dy="-5">T</tspan><tspan dy="5"> / &#8730;32</tspan></text>
+  <line x1="880" y1="244" x2="880" y2="258" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- the T x T matrix with causal mask -->
+  <g>
+    <!-- grid: 7x7, 20px cells, origin (810, 262). row i attends to col j -->
+    <!-- lower triangle (j <= i): visible; upper (j > i): masked -->
+    <rect x="810" y="262" width="140" height="140" fill="#fff7ed"/>
+    <!-- masked upper-triangle cells -->
+    <rect x="830" y="262" width="120" height="20" fill="#cbd5e1"/>
+    <rect x="850" y="282" width="100" height="20" fill="#cbd5e1"/>
+    <rect x="870" y="302" width="80" height="20" fill="#cbd5e1"/>
+    <rect x="890" y="322" width="60" height="20" fill="#cbd5e1"/>
+    <rect x="910" y="342" width="40" height="20" fill="#cbd5e1"/>
+    <rect x="930" y="362" width="20" height="20" fill="#cbd5e1"/>
+    <!-- grid lines -->
+    <path d="M 810 262 h140 M 810 282 h140 M 810 302 h140 M 810 322 h140 M 810 342 h140 M 810 362 h140 M 810 382 h140 M 810 402 h140
+             M 810 262 v140 M 830 262 v140 M 850 262 v140 M 870 262 v140 M 890 262 v140 M 910 262 v140 M 930 262 v140 M 950 262 v140"
+          stroke="#f97316" stroke-width="0.75" fill="none"/>
+    <!-- a sample -infinity in a masked cell -->
+    <text x="900" y="296" text-anchor="middle" font-size="10" fill="#475569">-&#8734;</text>
+    <!-- axis labels -->
+    <text x="880" y="256" text-anchor="middle" font-size="10" fill="#6b7280">j : token looked at &#8594;</text>
+    <text x="800" y="332" text-anchor="middle" font-size="10" fill="#6b7280" transform="rotate(-90 800 332)">i : token looking &#8595;</text>
+  </g>
+  <text x="965" y="285" font-size="10.5" fill="#4b5563">T &#215; T scores, one matrix</text>
+  <text x="965" y="299" font-size="10.5" fill="#4b5563">per head per sequence</text>
+  <text x="965" y="321" font-size="10.5" fill="#4b5563">grey = causal mask:</text>
+  <text x="965" y="335" font-size="10.5" fill="#4b5563">the future (j &gt; i) is</text>
+  <text x="965" y="349" font-size="10.5" fill="#4b5563">set to -&#8734; &#8594; weight 0</text>
+  <text x="965" y="371" font-size="10.5" font-style="italic" fill="#6b7280">this matrix is why cost</text>
+  <text x="965" y="385" font-size="10.5" font-style="italic" fill="#6b7280">grows as T&#178;</text>
+
+  <line x1="880" y1="404" x2="880" y2="418" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="760" y="420" width="240" height="28" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="880" y="438" text-anchor="middle" font-size="11.5" fill="#111827">softmax per row &#8594; weights sum to 1</text>
+  <line x1="880" y1="448" x2="880" y2="462" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <rect x="760" y="464" width="240" height="30" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="880" y="484" text-anchor="middle" font-size="11.5" font-family="Consolas, monospace" fill="#111827">out = weights @ v</text>
+  <!-- v joins from the right -->
+  <path d="M 1048 184 L 1048 479 L 1004 479" fill="none" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="1058" y="440" font-size="10.5" fill="#6b7280" transform="rotate(-90 1058 440)" text-anchor="middle">weighted average of values</text>
+
+  <line x1="880" y1="494" x2="880" y2="508" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="760" y="510" width="240" height="28" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="880" y="528" text-anchor="middle" font-size="11.5" fill="#111827">re-join 8 heads &#8594; (B, T, 256)</text>
+  <line x1="880" y1="538" x2="880" y2="552" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <rect x="760" y="554" width="240" height="28" rx="5" fill="#ffedd5" stroke="#f97316"/>
+  <text x="880" y="572" text-anchor="middle" font-size="11.5" fill="#111827">out_proj:  Linear 256 &#8594; 256</text>
+  <line x1="880" y1="582" x2="880" y2="596" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="880" y="612" text-anchor="middle" font-size="11" fill="#4b5563">&#8594; added back onto the residual stream</text>
+
+  <text x="930" y="650" text-anchor="middle" font-size="10.5" font-style="italic" fill="#6b7280">the only place in the whole network where</text>
+  <text x="930" y="664" text-anchor="middle" font-size="10.5" font-style="italic" fill="#6b7280">information moves between positions</text>
+</svg>

@@ -23,26 +23,15 @@ letter frequencies → spelling → grammar → short-range plot.
 
 ## The pipeline at a glance
 
-```
- text ──tokenizer──► token ids ──embedding──► vectors
-                                                 │
-                              ┌──────────────────┘
-                              ▼
-                  ┌─► [ transformer block ]  ×  n_layer
-                  │        attention   : positions share information
-                  │        MLP         : each position computes on its own
-                  └──── (residual stream carries it all upward)
-                              │
-                              ▼
-                    logits: one score per vocab token, per position
-                              │
-              training ◄──────┴──────► generation
-       compare to actual              softmax → sample → append → repeat
-       next token (loss),
-       adjust weights
-```
+![The TLM architecture: the full model, one transformer block, and the inside of causal self-attention](architecture.svg)
 
-Each chapter of these docs zooms into one box of that diagram.
+The figure reads left to right, zooming in as it goes: the **left panel** is
+the entire model from text to predictions (with both configs' dimensions
+tabulated below it); the **middle panel** opens up the repeated unit — one
+transformer block, drawn around the residual stream that everything else
+only ever *adds* to; the **right panel** opens up attention itself, down to
+the T×T causal-masked score matrix. The dimensions shown are the `stories`
+config. Each chapter of these docs zooms into one part of this figure.
 
 ## Where the parameters live
 
