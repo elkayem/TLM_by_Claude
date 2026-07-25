@@ -8,3 +8,5 @@ data/*
 !data/prepare_shakespeare.py
 !data/prepare_stories.py
 checkpoints/
+# archived weights-only exports (synced by OneDrive, too big for git)
+weights/
