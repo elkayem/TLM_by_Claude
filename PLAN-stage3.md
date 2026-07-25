@@ -40,9 +40,13 @@ TinyStories paper (Eldan & Li 2023).
 
 ## Logistics
 
-- **Exclude `checkpoints/` from OneDrive sync before launching** (or
-  point checkpoints outside the OneDrive tree): ~300MB per checkpoint
-  (weights + AdamW state) saved every 1000 steps would re-upload all week.
+- **DONE (2026-07-25): checkpoints relocated outside OneDrive.**
+  Default is now `C:\Users\lkmcg\tlm-checkpoints` (override via
+  TLM_CKPT_DIR env var; see checkpoint_dir() in tlm/config.py).
+  The shakespeare run was moved there; the stories run still lives at
+  the old repo checkpoints/ path (it was mid-run during the change; a
+  fallback in checkpoint_dir() finds it there, and it can be moved or
+  left after it finishes — a finished run no longer churns sync).
 - Windows Update / sleep settings: same drill as Stage 2; --resume works
   and the elapsed clock carries across restarts.
 

@@ -34,7 +34,7 @@ import time
 import numpy as np
 import torch
 
-from .config import PRESETS
+from .config import PRESETS, checkpoint_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
 
@@ -197,8 +197,9 @@ def main():
         lr=config.learning_rate, betas=(0.9, 0.95))
 
     # ---- checkpointing / resume
-    ckpt_dir = os.path.join(ROOT, "checkpoints", config.run_name)
+    ckpt_dir = checkpoint_dir(config.run_name)
     os.makedirs(ckpt_dir, exist_ok=True)
+    print(f"checkpoints -> {ckpt_dir}")
     ckpt_path = os.path.join(ckpt_dir, "latest.pt")
     best_path = os.path.join(ckpt_dir, "best.pt")
     log_path = os.path.join(ckpt_dir, "log.csv")

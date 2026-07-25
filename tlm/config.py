@@ -15,7 +15,33 @@ Three presets are defined at the bottom:
                 the long-weekend run.
 """
 
+import os
 from dataclasses import dataclass, asdict
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Checkpoints default to a folder OUTSIDE the repo — and, importantly,
+# outside OneDrive: checkpoint files are large (hundreds of MB at Stage 3
+# size) and rewritten every 1000 steps, which would make OneDrive
+# re-upload them continuously for the whole run. Override with the
+# TLM_CKPT_DIR environment variable to put them somewhere else.
+CKPT_ROOT = os.environ.get(
+    "TLM_CKPT_DIR",
+    os.path.join(os.path.expanduser("~"), "tlm-checkpoints"))
+
+
+def checkpoint_dir(run_name):
+    """Resolve the checkpoint folder for a run.
+
+    Runs created before checkpoints moved out of the repo are found in
+    the old location (checkpoints/ inside the repo) when they don't
+    exist under CKPT_ROOT, so old runs keep working unmoved.
+    """
+    new = os.path.join(CKPT_ROOT, run_name)
+    old = os.path.join(REPO_ROOT, "checkpoints", run_name)
+    if not os.path.isdir(new) and os.path.isdir(old):
+        return old
+    return new
 
 
 @dataclass

@@ -22,7 +22,7 @@ import os
 
 import torch
 
-from .config import TLMConfig
+from .config import TLMConfig, checkpoint_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
 
@@ -51,7 +51,7 @@ def main():
 
     # Rebuild the exact model that was trained: the checkpoint stores its
     # config, so architecture and weights always match.
-    ckpt_path = os.path.join(ROOT, "checkpoints", args.run, args.checkpoint)
+    ckpt_path = os.path.join(checkpoint_dir(args.run), args.checkpoint)
     ckpt = torch.load(ckpt_path, weights_only=True)
     config = TLMConfig(**ckpt["config"])
     model = TLM(config)
