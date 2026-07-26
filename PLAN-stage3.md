@@ -42,18 +42,18 @@ TinyStories paper (Eldan & Li 2023).
 
 - **DONE (2026-07-25): checkpoints relocated outside OneDrive.**
   Default is now `C:\Users\lkmcg\tlm-checkpoints` (override via
-  TLM_CKPT_DIR env var; see checkpoint_dir() in tlm/config.py).
-  The shakespeare run was moved there; the stories run still lives at
-  the old repo checkpoints/ path (it was mid-run during the change; a
-  fallback in checkpoint_dir() finds it there, and it can be moved or
-  left after it finishes — a finished run no longer churns sync).
+  TLM_CKPT_DIR env var; see checkpoint_dir() in tlm/config.py). Both
+  finished runs live there now; the in-repo checkpoints/ folder is gone.
 - Windows Update / sleep settings: same drill as Stage 2; --resume works
   and the elapsed clock carries across restarts.
 
-## State when this plan was written
+## State as of 2026-07-25
 
-- Stage 1 (shakespeare): done, best val 1.6094.
-- Stage 2 (stories): ~52k/60k steps, best val 1.6022 @ 49k, train~=val
-  (no overfitting; capacity-limited). Expected to finish on schedule.
-- Repo: everything committed through the architecture figure
-  (docs/architecture.svg). Venv at ../.venv (torch 2.13 CPU).
+- Stage 1 (shakespeare): done, best val 1.6094, 2.7M params, ~2h.
+- Stage 2 (stories): **COMPLETE** — all 60k steps in 55.7h, best val
+  1.5949 @ step 57k. train~=val throughout (no overfitting; the model is
+  capacity-limited, which is why Stage 3 scales up rather than trains
+  longer). Produces coherent multi-sentence stories.
+- Weights-only archives (~30MB/11MB) in tlm/weights/, gitignored but
+  synced by OneDrive. Full checkpoints in ~/tlm-checkpoints/.
+- Venv at ../.venv (torch 2.13 CPU, Python 3.14).

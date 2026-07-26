@@ -16,13 +16,21 @@ commented well enough that I could understand the inner mechanics. -Larry
 | Dataset | Tiny Shakespeare (~1 MB) | TinyStories (~1.9 GB) |
 | Tokenizer | character-level (65 tokens) | BPE, trained from scratch (4096 tokens) |
 | Size | ~2.7M parameters | ~7.4M parameters |
-| Training time (CPU) | ~2 hours | ~48 hours (the long weekend) |
+| Training time (CPU) | 2 hours | 56 hours (the long weekend) |
+| Best val loss | 1.609 | 1.595 |
 | What you get | fake Shakespeare | coherent little children's stories |
 
 Stage 1 is the fast feedback loop for learning the architecture. Stage 2 is
 the payoff: the TinyStories dataset was designed (Eldan & Li 2023) so that
 even single-digit-million-parameter models learn grammar, plot, and
-character consistency.
+character consistency. Both rows above are measured results from an Intel
+Core Ultra 7 265 (20 cores, no GPU) — a sample from the finished stories
+model:
+
+> Once upon a time, there was a little girl named Lily. She loved to play
+> with her toys and eat candy. One day, she went to the park to play with
+> her friends. They were having fun, but then Lily saw a butterfly. She
+> wanted to catch it, but the butterfly flew away.
 
 ## Quickstart
 
@@ -44,12 +52,19 @@ python -m tlm.generate --run stories --prompt "Once upon a time"
 
 While training, a text sample is printed every 500–1000 steps — watching the
 output evolve from noise → words → sentences is the best part; keep notes in
-[JOURNAL.md](JOURNAL.md). Progress is logged to `checkpoints/<run>/log.csv`.
+[JOURNAL.md](JOURNAL.md).
 
-**Practical notes for the weekend run:** set Windows power settings so the
-PC doesn't sleep; the run checkpoints every 1000 steps (~50 min), so a
-reboot costs at most that. `latest.pt` is the newest checkpoint, `best.pt`
-the best validation loss so far.
+**Where checkpoints go:** `~/tlm-checkpoints/<run>/` by default — deliberately
+outside the repo, since checkpoints are large and rewritten every 1000 steps
+(inside a synced folder like OneDrive that means constant re-uploading).
+Set the `TLM_CKPT_DIR` environment variable to put them elsewhere. Each run
+folder holds `best.pt` (lowest val loss), `latest.pt` (most recent, used by
+`--resume`), and `log.csv` (step, lr, losses, throughput — for plotting).
+
+**Practical notes for the weekend run:** set your power settings so the PC
+doesn't sleep; the run checkpoints every 1000 steps (~50 min), so an
+interruption costs at most that, and `--resume` picks up where it stopped
+(including the elapsed-time clock).
 
 ## The guided tour (docs/)
 
@@ -71,8 +86,9 @@ Then read in order, next to the code file each chapter covers:
 ```
 tlm/
 ├── README.md            you are here
-├── JOURNAL.md           your training diary
-├── docs/                the textbook
+├── JOURNAL.md           training diary: samples as the models learned
+├── PLAN-stage3.md       what's next: instruction-following (~25M params)
+├── docs/                the textbook + architecture figure
 ├── tlm/
 │   ├── config.py        all hyperparameters + presets
 │   ├── tokenizer.py     char + from-scratch BPE
@@ -81,6 +97,8 @@ tlm/
 │   └── generate.py      sampling CLI
 ├── data/
 │   ├── prepare_shakespeare.py
-│   └── prepare_stories.py
-└── checkpoints/         created during training
+│   └── prepare_stories.py     (downloaded corpora land here, gitignored)
+└── weights/             archived weights-only exports (gitignored)
+
+~/tlm-checkpoints/       full checkpoints, outside the repo (see above)
 ```
