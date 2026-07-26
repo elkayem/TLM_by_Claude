@@ -62,6 +62,11 @@ class CharTokenizer:
     def decode(self, ids):
         return "".join(self.itos[i] for i in ids)
 
+    @property
+    def eot_id(self):
+        # Char tokenizers have no end-of-text token; see BPETokenizer.
+        return None
+
     # -- persistence --------------------------------------------------------
     def save(self, path):
         with open(path, "w", encoding="utf-8") as f:
@@ -111,7 +116,7 @@ class BPETokenizer:
     #   '\n\n'    - runs of whitespace (newlines etc.) that remain
     _WORD_RE = re.compile(r" ?[A-Za-z]+| ?[0-9]+| ?[^A-Za-z0-9\s]+|\s+")
 
-    def __init__(self, merges=None, vocab=None):
+    def __init__(self, merges=None, vocab=None, special_tokens=None):
         # merges: list of pairs in the ORDER they were learned, e.g.
         #   [('t','h'), ('th','e'), ...]
         self.merges = merges or []
@@ -123,13 +128,33 @@ class BPETokenizer:
         self.inv_vocab = {i: t for t, i in self.vocab.items()}
         self._word_cache = {}  # word -> [ids], the cache described above
 
+        # SPECIAL TOKENS, e.g. "<|endoftext|>". A special token is ATOMIC:
+        # it always maps to exactly one id, and BPE never sees inside it.
+        # Why this matters: without it, "<|endoftext|>" is just 13
+        # characters that BPE happens to compress into a few ordinary
+        # tokens - the model can learn it *statistically*, but nothing can
+        # rely on it exactly. With a real special id, the data pipeline
+        # can mark story boundaries unambiguously and generate() can STOP
+        # the instant the model emits it. Real LLMs work the same way
+        # (chat markers like <|im_start|> are special tokens too).
+        self.special_tokens = special_tokens or []
+        self._special_re = (
+            re.compile("(" + "|".join(re.escape(t)
+                                      for t in self.special_tokens) + ")")
+            if self.special_tokens else None)
+
     @property
     def vocab_size(self):
         return len(self.vocab)
 
+    @property
+    def eot_id(self):
+        """Id of the end-of-text special token, or None if there isn't one."""
+        return self.vocab.get("<|endoftext|>")
+
     # -- training -----------------------------------------------------------
     @classmethod
-    def train(cls, text, vocab_size, verbose=True):
+    def train(cls, text, vocab_size, special_tokens=None, verbose=True):
         """Learn the merge list from a training corpus.
 
         We never store the corpus token-by-token. Instead we exploit
@@ -139,6 +164,12 @@ class BPETokenizer:
         thousands of UNIQUE words, so this is thousands of times faster
         than operating on the raw token stream.
         """
+        special_tokens = special_tokens or []
+        # Cut special tokens out of the training text so merge statistics
+        # never see them: they must stay atomic, not become merge fodder.
+        for tok in special_tokens:
+            text = text.replace(tok, "\n")
+
         # Corpus as {word: count}, each word stored as a tuple of 1-char
         # tokens, e.g. ' the' -> (' ', 't', 'h', 'e')  [note leading space]
         word_counts = Counter(cls._WORD_RE.findall(text))
@@ -148,7 +179,8 @@ class BPETokenizer:
         vocab = {ch for w in words for ch in w}
         merges = []
 
-        while len(vocab) + len(merges) < vocab_size:
+        # Reserve room at the end of the vocab for the special tokens.
+        while len(vocab) + len(merges) + len(special_tokens) < vocab_size:
             # Step 1: count adjacent pairs across all unique words,
             # weighted by how often each word occurs.
             pairs = Counter()
@@ -184,9 +216,11 @@ class BPETokenizer:
                       f"(freq {freq})")
 
         # Final vocabulary: base characters first (sorted, for determinism),
-        # then merged tokens in the order they were created.
-        tokens = sorted(vocab) + [a + b for a, b in merges]
-        return cls(merges=merges, vocab={t: i for i, t in enumerate(tokens)})
+        # then merged tokens in creation order, then special tokens last.
+        tokens = sorted(vocab) + [a + b for a, b in merges] + special_tokens
+        return cls(merges=merges,
+                   vocab={t: i for i, t in enumerate(tokens)},
+                   special_tokens=special_tokens)
 
     # -- encoding -----------------------------------------------------------
     def _encode_word(self, word):
@@ -228,9 +262,17 @@ class BPETokenizer:
         return ids
 
     def encode(self, text):
+        # First split on special tokens (if any), so each special maps
+        # straight to its id and BPE only runs on the text between them.
+        segments = (self._special_re.split(text) if self._special_re
+                    else [text])
         ids = []
-        for word in self._WORD_RE.findall(text):
-            ids.extend(self._encode_word(word))
+        for seg in segments:
+            if seg in self.vocab and seg in self.special_tokens:
+                ids.append(self.vocab[seg])
+                continue
+            for word in self._WORD_RE.findall(seg):
+                ids.extend(self._encode_word(word))
         return ids
 
     def decode(self, ids):
@@ -243,13 +285,16 @@ class BPETokenizer:
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"type": "bpe",
                        "merges": [list(p) for p in self.merges],
-                       "vocab": self.vocab}, f)
+                       "vocab": self.vocab,
+                       "special_tokens": self.special_tokens}, f)
 
     @classmethod
     def load(cls, path):
         with open(path, encoding="utf-8") as f:
             d = json.load(f)
-        return cls(merges=[tuple(p) for p in d["merges"]], vocab=d["vocab"])
+        # .get(): tokenizers saved before special-token support load fine.
+        return cls(merges=[tuple(p) for p in d["merges"]], vocab=d["vocab"],
+                   special_tokens=d.get("special_tokens", []))
 
 
 def load_tokenizer(path):

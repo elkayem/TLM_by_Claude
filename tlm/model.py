@@ -331,7 +331,7 @@ class TLM(nn.Module):
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None,
-                 top_p=None):
+                 top_p=None, stop_token=None):
         """Autoregressive sampling: the loop that turns a next-token
         predictor into a text generator.
 
@@ -348,6 +348,10 @@ class TLM(nn.Module):
                         tokens whose probabilities sum to p.
           Both cut off the long tail of low-probability tokens, which is
           where degenerate gibberish comes from.
+          stop_token   - if the model samples this id (e.g. the
+                        <|endoftext|> special token), stop generating:
+                        the model has said "the story is over". Only
+                        meaningful for batch size 1.
         """
         self.eval()
         for _ in range(max_new_tokens):
@@ -385,6 +389,10 @@ class TLM(nn.Module):
                 # the single most likely token produces dull, loop-prone
                 # text; the randomness is doing real work here).
                 idx_next = torch.multinomial(probs, num_samples=1)
+
+            if (stop_token is not None and idx.size(0) == 1
+                    and idx_next.item() == stop_token):
+                break  # end-of-text sampled: don't append it, just stop
 
             idx = torch.cat((idx, idx_next), dim=1)  # append; length grows
         return idx

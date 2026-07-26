@@ -124,4 +124,49 @@ PRESETS = {
         checkpoint_interval=1000, dropout=0.05,
         dataset="stories", run_name="stories",
     ),
+
+    # ------------------------------------------------------ Stage 3 presets
+
+    # Warm-up: FINE-TUNE the finished 7.4M stories model on the Instruct
+    # data (train with:  --config instruct-ft --init-from stories).
+    # Architecture must EXACTLY match the stories preset - we're loading
+    # its weights - and the data must use the stories tokenizer (a model's
+    # embedding table is welded to the tokenizer it was trained with).
+    # Lower peak LR (10x down) and short schedule: fine-tuning nudges an
+    # already-good model toward a new format; big steps would wreck what
+    # it knows ("catastrophic forgetting").
+    "instruct-ft": TLMConfig(
+        block_size=256, n_layer=8, n_head=8, n_embd=256,
+        batch_size=32, max_steps=4000, warmup_steps=100,
+        learning_rate=3e-5, min_lr=3e-6,
+        eval_interval=250, eval_iters=50, sample_interval=500,
+        checkpoint_interval=500, dropout=0.05,
+        dataset="instruct-ft", run_name="instruct-ft",
+    ),
+
+    # Pilot for the big run: same architecture, ~1k steps (~2-3h expected),
+    # to measure the true seconds/step before committing a week. If it
+    # comes in slower than ~15 s/step, shrink n_embd to 448 in `instruct`.
+    "instruct-pilot": TLMConfig(
+        block_size=512, n_layer=8, n_head=8, n_embd=512,
+        batch_size=16, max_steps=1000, warmup_steps=100,
+        eval_interval=100, eval_iters=20, sample_interval=500,
+        checkpoint_interval=500, dropout=0.05,
+        dataset="instruct", run_name="instruct-pilot",
+    ),
+
+    # Stage 3: ~27M params on TinyStories-Instruct, the week-long run.
+    # block_size doubles to 512 so a whole example (Summary/Words/Features
+    # preamble + story, ~300-400 tokens) fits in one window - the model
+    # can't learn to FOLLOW the preamble if it rarely sees preamble and
+    # story together. batch_size halves to keep tokens/step at 8,192.
+    # 55k steps x 8,192 = ~450M tokens ~= 1 epoch ~= Chinchilla-optimal
+    # for this size (~20 tokens per parameter).
+    "instruct": TLMConfig(
+        block_size=512, n_layer=8, n_head=8, n_embd=512,
+        batch_size=16, max_steps=55000, warmup_steps=1000,
+        eval_interval=500, eval_iters=50, sample_interval=1000,
+        checkpoint_interval=1000, dropout=0.05,
+        dataset="instruct", run_name="instruct",
+    ),
 }

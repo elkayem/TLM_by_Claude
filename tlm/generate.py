@@ -44,6 +44,8 @@ def main():
     parser.add_argument("--top-p", type=float, default=None)
     parser.add_argument("--seed", type=int, default=None,
                         help="set for reproducible output")
+    parser.add_argument("--ignore-eos", action="store_true",
+                        help="keep generating past <|endoftext|>")
     args = parser.parse_args()
 
     if args.seed is not None:
@@ -71,9 +73,13 @@ def main():
         ids = tokenizer.encode("\n")
     ctx = torch.tensor([ids], dtype=torch.long)   # shape (1, T): batch of 1
 
+    # If the tokenizer has a true <|endoftext|> token, stop generation when
+    # the model emits it - the model itself decides where the story ends.
+    stop = None if args.ignore_eos else tokenizer.eot_id
     out = model.generate(ctx, max_new_tokens=args.tokens,
                          temperature=args.temperature,
-                         top_k=args.top_k, top_p=args.top_p)
+                         top_k=args.top_k, top_p=args.top_p,
+                         stop_token=stop)
     # out still includes the prompt tokens at the front; print it all so
     # the continuation reads naturally.
     print(tokenizer.decode(out[0].tolist()))

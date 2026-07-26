@@ -48,6 +48,12 @@ python data\prepare_stories.py              # ~2GB download + BPE (run overnight
 python -m tlm.train --config stories        # the weekend run
 python -m tlm.train --config stories --resume    # continue after interruption
 python -m tlm.generate --run stories --prompt "Once upon a time"
+
+# Stage 3: instruction following (see docs/08-instruct.md + PLAN-stage3.md)
+python data\prepare_instruct.py             # ~2.7GB download + encode (hours)
+python -m tlm.train --config instruct-ft --init-from stories   # fine-tune warm-up
+python -m tlm.train --config instruct-pilot                    # measure s/step
+python -m tlm.train --config instruct                          # the week-long run
 ```
 
 While training, a text sample is printed every 500–1000 steps — watching the
@@ -80,6 +86,7 @@ Then read in order, next to the code file each chapter covers:
 6. [05-full-model.md](docs/05-full-model.md) — assembling TLM (`model.py: TLM`)
 7. [06-training.md](docs/06-training.md) — the training loop (`train.py`)
 8. [07-sampling.md](docs/07-sampling.md) — generating text (`generate.py`, `TLM.generate`)
+9. [08-instruct.md](docs/08-instruct.md) — Stage 3: instruction following, special tokens, fine-tuning
 
 ## Layout
 

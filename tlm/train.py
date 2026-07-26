@@ -151,6 +151,9 @@ def main():
                         choices=sorted(PRESETS.keys()))
     parser.add_argument("--resume", action="store_true",
                         help="continue from the latest checkpoint")
+    parser.add_argument("--init-from", default=None, metavar="RUN",
+                        help="fine-tune: start from another run's best.pt "
+                             "weights (fresh optimizer and step counter)")
     args = parser.parse_args()
     config = PRESETS[args.config]
 
@@ -178,6 +181,25 @@ def main():
     print(f"config: {args.config} | params: {model.num_params()/1e6:.2f}M | "
           f"vocab: {config.vocab_size} | "
           f"tokens/step: {config.batch_size * config.block_size:,}")
+
+    # FINE-TUNING (--init-from): instead of random weights, start from a
+    # model trained on something else and continue training on THIS
+    # dataset. Only the weights carry over - the optimizer state, step
+    # counter and LR schedule start fresh. This is the cheap way to adapt
+    # a trained model to a new task/format, and it only makes sense when
+    # the architecture and tokenizer both match the source run exactly:
+    # the embedding table is indexed BY the source tokenizer's ids, so a
+    # different tokenizer would scramble every token's meaning.
+    if args.init_from and not args.resume:
+        src_path = os.path.join(checkpoint_dir(args.init_from), "best.pt")
+        src = torch.load(src_path, weights_only=True)
+        for key in ("vocab_size", "block_size", "n_layer", "n_head", "n_embd"):
+            assert src["config"][key] == getattr(config, key), (
+                f"can't fine-tune: {key} differs "
+                f"({src['config'][key]} vs {getattr(config, key)})")
+        model.load_state_dict(src["model"])
+        print(f"initialized weights from '{args.init_from}' "
+              f"(step {src['step']}, val {src['best_val']:.4f})")
 
     # AdamW: the default optimizer for transformers. Per-weight adaptive
     # step sizes from running averages of the gradient (momentum) and its
