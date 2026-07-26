@@ -25,18 +25,20 @@ TinyStories paper (Eldan & Li 2023).
 
 ## Order of work
 
-1. Prep script for TinyStories-Instruct (download, tokenizer retrain,
-   encode) — model the existing data/prepare_stories.py.
-2. Special-token support in tokenizer + stop-at-EOS in generation.
-3. **Warm-up experiment: fine-tune the existing 7.4M stories model on
-   Instruct for a few hours.** De-risks the data pipeline, teaches
-   fine-tuning (new docs chapter), gives a baseline the 25M must beat.
-4. **Pilot the 25M config ~1k steps (~2-3h)** to measure real s/step
-   before committing the week. If slower than ~15 s/step at block 512,
-   trim to ~18-20M (n_embd 448). Finishing the schedule beats size.
-5. Launch the week-long run; journal as before.
-6. New docs chapter(s): conditional generation / instruction following;
-   fine-tuning.
+1. ~~Prep script for TinyStories-Instruct~~ **DONE** —
+   data/prepare_instruct.py (note: dataset lives in its own HF repo,
+   roneneldan/TinyStoriesInstruct, 2.66GB). Writes data/instruct/ (new
+   4096 BPE) and data/instruct-ft/ (stories tokenizer, 400MB slice).
+2. ~~Special-token support + stop-at-EOS~~ **DONE** — atomic
+   <|endoftext|>, eot_id, generate(stop_token=...), --ignore-eos flag.
+3. **Warm-up experiment (NEXT):** fine-tune the 7.4M stories model:
+   `python -m tlm.train --config instruct-ft --init-from stories`
+   (--init-from implemented and smoke-verified end to end).
+4. **Pilot:** `python -m tlm.train --config instruct-pilot` (~1k steps)
+   to measure real s/step. If slower than ~15 s/step, trim n_embd to 448.
+5. Launch: `python -m tlm.train --config instruct`; journal as before.
+6. ~~Docs~~ **DONE** — docs/08-instruct.md (instruction following as
+   data formatting, special tokens, fine-tuning, Chinchilla sizing).
 
 ## Logistics
 
