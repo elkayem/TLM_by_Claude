@@ -160,11 +160,12 @@ PRESETS = {
     # preamble + story, ~300-400 tokens) fits in one window - the model
     # can't learn to FOLLOW the preamble if it rarely sees preamble and
     # story together. batch_size halves to keep tokens/step at 8,192.
-    # 55k steps x 8,192 = ~450M tokens ~= 1 epoch ~= Chinchilla-optimal
-    # for this size (~20 tokens per parameter).
+    # 65k steps x 8,192 = ~533M tokens ~= 20 tokens/parameter, the
+    # Chinchilla-optimal budget for this size; the pilot measured
+    # 1,220 tok/s on the dev machine, making this ~5 days wall-clock.
     "instruct": TLMConfig(
         block_size=512, n_layer=8, n_head=8, n_embd=512,
-        batch_size=16, max_steps=55000, warmup_steps=1000,
+        batch_size=16, max_steps=65000, warmup_steps=1000,
         eval_interval=500, eval_iters=50, sample_interval=1000,
         checkpoint_interval=1000, dropout=0.05,
         dataset="instruct", run_name="instruct",

@@ -34,8 +34,11 @@ TinyStories paper (Eldan & Li 2023).
 3. **Warm-up experiment (NEXT):** fine-tune the 7.4M stories model:
    `python -m tlm.train --config instruct-ft --init-from stories`
    (--init-from implemented and smoke-verified end to end).
-4. **Pilot:** `python -m tlm.train --config instruct-pilot` (~1k steps)
-   to measure real s/step. If slower than ~15 s/step, trim n_embd to 448.
+4. ~~Pilot~~ **DONE (2026-07-26):** 1,220 tok/s sustained = 6.7 s/step —
+   passes the 15 s/step gate with 2.2x margin; no size trim needed.
+   Consequence: max_steps raised 55k -> 65k (~533M tokens ~= 20
+   tok/param, Chinchilla-optimal; ~5.1 days). Fine-tune warm-up also
+   done: best val 1.5048 in 3.75h, model follows its own preambles.
 5. Launch: `python -m tlm.train --config instruct`; journal as before.
 6. ~~Docs~~ **DONE** — docs/08-instruct.md (instruction following as
    data formatting, special tokens, fine-tuning, Chinchilla sizing).
