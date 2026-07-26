@@ -5,6 +5,10 @@ to train on a CPU, written to be **read**. Every file is heavily commented,
 and the `docs/` folder is a chapter-by-chapter walkthrough of how and why it
 all works.
 
+**Note from elkayem:** This project was created entirely by Claude Fable 5 based on my prompts. 
+My goal was to create an LLM that was simple enough for me to train on my home PC, and 
+commented well enough that I could understand the inner mechanics. -Larry
+
 ## The two models
 
 | | Stage 1: `shakespeare` | Stage 2: `stories` |
