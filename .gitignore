@@ -7,7 +7,7 @@ __pycache__/
 data/*
 !data/prepare_shakespeare.py
 !data/prepare_stories.py
+!data/prepare_instruct.py
 checkpoints/
 # archived weights-only exports (synced by OneDrive, too big for git)
 weights/
-data/prepare_instruct_output.txt
