@@ -46,6 +46,8 @@ TinyStories paper (Eldan & Li 2023).
   finished runs live there now; the in-repo checkpoints/ folder is gone.
 - Windows Update / sleep settings: same drill as Stage 2; --resume works
   and the elapsed clock carries across restarts.
+- **The repo is published at https://github.com/elkayem/TLM_by_Claude**
+  (remote `origin`, branch `master`). Push commits as work lands.
 
 ## State as of 2026-07-25
 

@@ -1,0 +1,6 @@
+# Install PyTorch's CPU build (much smaller than the default CUDA build):
+#   pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.13
+numpy
+requests
+truststore
