@@ -11,3 +11,6 @@ data/*
 checkpoints/
 # archived weights-only exports (synced by OneDrive, too big for git)
 weights/
+# local copies of the reference papers (see README references; not
+# redistributed via the repo)
+docs/papers/
