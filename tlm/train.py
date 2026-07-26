@@ -154,6 +154,15 @@ def main():
     parser.add_argument("--init-from", default=None, metavar="RUN",
                         help="fine-tune: start from another run's best.pt "
                              "weights (fresh optimizer and step counter)")
+    # Early stopping, OFF by default - deliberately. With a cosine LR
+    # schedule the largest val improvements often arrive in the final
+    # anneal (the stories run looked stalled from step 49k to 53k, then
+    # set its best at 57k of 60k), and eval noise is around +/-0.01, so
+    # short patience stops runs at exactly the wrong moment. If you use
+    # this, be generous: at least 20 evals.
+    parser.add_argument("--patience", type=int, default=None, metavar="N",
+                        help="stop if val loss sets no new best for N "
+                             "consecutive evals (default: run to the end)")
     args = parser.parse_args()
     config = PRESETS[args.config]
 
@@ -253,6 +262,7 @@ def main():
     # elapsed_before to get cumulative training time across resumes.
     t0, tokens_since = time.time(), 0
     session_start = time.time()
+    evals_since_best = 0  # for --patience
     for step in range(start_step, config.max_steps):
         # set this step's learning rate on every param group
         lr = get_lr(step, config)
@@ -294,8 +304,18 @@ def main():
             # keep a separate copy of the best-ever model by val loss
             if losses["val"] < best_val:
                 best_val = losses["val"]
+                evals_since_best = 0
                 save_checkpoint(best_path, model, optimizer, step, config,
                                 best_val, elapsed)
+            else:
+                evals_since_best += 1
+                if (args.patience is not None
+                        and evals_since_best >= args.patience):
+                    print(f"early stop: no new best val in "
+                          f"{evals_since_best} evals (best {best_val:.4f})")
+                    save_checkpoint(ckpt_path, model, optimizer, step,
+                                    config, best_val, elapsed)
+                    return
 
         # ---- periodic sample: watch the model learn to write
         if step > 0 and step % config.sample_interval == 0:
