@@ -17,9 +17,12 @@ commented well enough that I could understand the inner mechanics. -Larry
 | Tokenizer | character-level (65 tokens) | BPE, trained from scratch (4096) | new BPE (4096) + `<\|endoftext\|>` special token |
 | Size | ~2.7M parameters | ~7.4M parameters | ~27M parameters |
 | Context | 256 tokens | 256 tokens | 512 tokens |
-| Training time (CPU) | 2 hours | 56 hours (the long weekend) | ~1 week (in progress) |
-| Best val loss | 1.609 | 1.595 | — |
+| Training time (CPU) | 2 hours | 56 hours (the long weekend) | 118 hours (5 days) |
+| Best val loss | 1.609 | 1.595 | 1.257* |
 | What you get | fake Shakespeare | coherent little children's stories | stories to order: give it a summary, required words, or features |
+
+\* Not comparable across columns: each model is scored under its own
+tokenizer and dataset, which changes what "loss per token" means.
 
 Stage 1 is the fast feedback loop for learning the architecture. Stage 2 is
 the payoff: the TinyStories dataset was designed (Eldan & Li 2023) so that
