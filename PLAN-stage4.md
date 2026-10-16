@@ -345,10 +345,21 @@ Directions:
    - **Losses at step 499:** recipe 3.06 < review 4.34 < story 5.03 <
      book 5.28 < wiki 5.48. Formulaic text is learned first. The first
      sample (step 250) already stopped by itself at `<|endoftext|>`.
-6. **Launch** `python -m tlm.train --config mixtape` (~3.1 days); journal
-   with the prompt bank. Start it in its own console window, not as a
-   child of a Claude session, so closing the app can't stop it. Check
-   the power settings (no sleep) first; `--resume` after any restart.
+6. **LAUNCHED 2026-10-16 07:02** (~3.1 days, so expect it to finish
+   around **2026-10-19 mid-morning**). Journal it with the prompt bank.
+   - **Launcher:** `tools\train_mixtape.cmd`, double-clickable. It runs
+     `tools\train_mixtape.ps1`, which starts `--config mixtape`, or adds
+     `--resume` when `~/tlm-checkpoints/mixtape/latest.pt` exists, and
+     tees all output to `~/tlm-data/mixtape-train.log`. After a restart
+     or crash, double-click it again.
+   - **Started through Explorer:** the process chain is explorer → cmd →
+     powershell → python, not a child of a Claude session.
+   - **Pre-flight:** AC sleep and hibernate are both "never" (a desktop,
+     no battery).
+   - **At launch:** step 0 val 9.83 (≈ ln 16,384); GPU 100%, 4.9 GB used
+     including the desktop, 69 W, 55 °C.
+   - **While it trains,** the desktop app falls back to the CPU (the GPU
+     has < 1.5 GB free) and Reload picks up the newest `mixtape/best.pt`.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
@@ -700,6 +711,11 @@ move items from "Coming" to "Ready" when they're built and tested.
 
 ### Coming (document when built)
 
+- Mixtape training launcher (built 2026-10-16; document once the run
+  finishes): double-click `tools\train_mixtape.cmd`. It starts the run or
+  resumes it automatically and logs to `~/tlm-data/mixtape-train.log`.
+  `TLM_PYTHON` overrides the venv python (default
+  `%USERPROFILE%\tlm-venv`).
 - Mixtape quickstart: the pilot and train commands. Measured on the RTX
   3050: pilot ~30 min, ~9,300 tok/s, 3.73 GB peak at micro-batch 2;
   full run ~3.1 days. Add the final loss and samples after step 6.
