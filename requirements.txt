@@ -8,3 +8,4 @@ torch>=2.13
 numpy
 requests
 truststore
+pyarrow      # Stage 4: reads the parquet files of the mixtape sources

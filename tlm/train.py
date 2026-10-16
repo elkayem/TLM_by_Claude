@@ -35,13 +35,9 @@ import time
 import numpy as np
 import torch
 
-from .config import PRESETS, checkpoint_dir
+from .config import PRESETS, checkpoint_dir, data_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
-
-# Resolve paths relative to the project root (the directory containing
-# this package), so the script works no matter where you invoke it from.
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def pick_device(requested):
@@ -224,14 +220,22 @@ def main():
     # np.memmap reads pages from disk on demand instead of loading the
     # whole corpus into RAM - essential for the ~1GB TinyStories bin on a
     # 16GB machine, free for the tiny Shakespeare one.
-    data_dir = os.path.join(ROOT, "data", config.dataset)
+    ddir = data_dir(config.dataset)
     splits = {
-        "train": np.memmap(os.path.join(data_dir, "train.bin"),
+        "train": np.memmap(os.path.join(ddir, "train.bin"),
                            dtype=np.uint16, mode="r"),
-        "val": np.memmap(os.path.join(data_dir, "val.bin"),
+        "val": np.memmap(os.path.join(ddir, "val.bin"),
                          dtype=np.uint16, mode="r"),
     }
-    tokenizer = load_tokenizer(os.path.join(data_dir, "tokenizer.json"))
+    # Mixed datasets (Stage 4) also hold out a validation set PER SOURCE,
+    # val_<genre>.bin: one overall val number can hide that the model has
+    # mastered recipes but still struggles with old novels.
+    genre_vals = sorted(f[4:-4] for f in os.listdir(ddir)
+                        if f.startswith("val_") and f.endswith(".bin"))
+    for g in genre_vals:
+        splits[f"val_{g}"] = np.memmap(os.path.join(ddir, f"val_{g}.bin"),
+                                       dtype=np.uint16, mode="r")
+    tokenizer = load_tokenizer(os.path.join(ddir, "tokenizer.json"))
     config.vocab_size = tokenizer.vocab_size
 
     # ---- model & optimizer
@@ -318,7 +322,8 @@ def main():
     if start_step == 0:
         with open(log_path, "w", newline="") as f:
             csv.writer(f).writerow(
-                ["step", "lr", "train_loss", "val_loss", "tok_per_sec"])
+                ["step", "lr", "train_loss", "val_loss", "tok_per_sec"]
+                + [f"val_{g}" for g in genre_vals])
 
     # ---- the loop
     model.train()
@@ -373,10 +378,14 @@ def main():
             print(f"step {step:6d} | lr {lr:.2e} | "
                   f"train {losses['train']:.4f} | val {losses['val']:.4f} | "
                   f"{tps:,.0f} tok/s | elapsed {fmt_hms(elapsed)}{mem}")
+            if genre_vals:
+                print("             val by genre: " + " | ".join(
+                    f"{g} {losses['val_' + g]:.4f}" for g in genre_vals))
             with open(log_path, "a", newline="") as f:
                 csv.writer(f).writerow(
                     [step, f"{lr:.2e}", f"{losses['train']:.4f}",
-                     f"{losses['val']:.4f}", f"{tps:.0f}"])
+                     f"{losses['val']:.4f}", f"{tps:.0f}"]
+                    + [f"{losses['val_' + g]:.4f}" for g in genre_vals])
             t0, tokens_since = time.time(), 0
             # keep a separate copy of the best-ever model by val loss
             if losses["val"] < best_val:
@@ -395,12 +404,18 @@ def main():
                     return
 
         # ---- periodic sample: watch the model learn to write
+        # Samples take turns through config.sample_prompts (just "\n"
+        # before Stage 4), and stop at <|endoftext|> if the model says so.
         if step > 0 and step % config.sample_interval == 0:
-            ctx = torch.tensor([tokenizer.encode("\n")], dtype=torch.long,
+            prompts = config.sample_prompts
+            prompt = prompts[(step // config.sample_interval - 1)
+                             % len(prompts)]
+            ctx = torch.tensor([tokenizer.encode(prompt)], dtype=torch.long,
                                device=device)
             with autocast:
                 out = model.generate(ctx, max_new_tokens=200,
-                                     temperature=0.8, top_k=50)
+                                     temperature=0.8, top_k=50,
+                                     stop_token=tokenizer.eot_id)
             model.train()  # generate() switched to eval mode
             print("-" * 60)
             print(tokenizer.decode(out[0].tolist()))

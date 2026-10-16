@@ -150,11 +150,11 @@ Directions:
   and offensive slurs were replaced with placeholders. `metadata.csv` has
   `short_book_title` (no author field).
 - **review** — HF `McAuley-Lab/Amazon-Reviews-2023`: per-category
-  `review_categories/<Category>.jsonl.gz` plus
-  `meta_categories/meta_<Category>.jsonl.gz`, joined on `parent_asin` to
-  get the product name. Pick 3–4 mid-sized categories in prep (candidates:
-  Pet Supplies, Toys and Games, Grocery and Gourmet Food, Tools and Home
-  Improvement). Filters:
+  `raw/review_categories/<Category>.jsonl` plus
+  `raw/meta_categories/meta_<Category>.jsonl` (uncompressed), joined on
+  `parent_asin` to get the product name. Chosen: Pet Supplies, Toys and
+  Games, Grocery and Gourmet Food (8.4 + 7.3 + 6.0 GB of reviews).
+  Filters:
   - drop reviews under ~20 words
   - **rebalance star ratings** — real reviews skew heavily to 5 stars;
     roughly equal shares make the `Rating:` field mean something, and the
@@ -215,24 +215,88 @@ Directions:
      1,000 steps.
    - Moved to step 3, because they need the mixtape data: per-genre val
      splits, and samples drawn from the prompt bank.
-2. **Data location** — raw downloads (tens of GB) and the ~5 GB bin must
-   NOT live in the repo: the repo is in OneDrive, which would upload all
-   of it. Add a `TLM_DATA_DIR` env var / default `~/tlm-data/`, mirroring
-   `TLM_CKPT_DIR`, and resolve old datasets in-repo as `checkpoint_dir()`
-   does. `train.py` and `generate.py` both read `data/<dataset>/` today.
-3. **`data/prepare_mixtape.py`** — downloads (resumable, like
-   `prepare_stories.download`), one formatter per genre, tokenizer
-   training, encoding, mixing, and the per-genre val bins. Add
-   `!data/prepare_mixtape.py` to `.gitignore`. New dependency:
-   `pyarrow` (parquet). Measure encode speed on a sample first:
-   Wikipedia and books have far more distinct words than TinyStories, so
-   the tokenizer's word cache will help less. Parallelize across the 20
-   cores if needed. Manual step: the RecipeNLG download. Also the two
-   `train.py` pieces carried over from step 1: evaluate every
-   `val_<genre>.bin` alongside `val.bin`, and draw training samples from
-   the prompt bank instead of "\n".
-4. **Inspect before training** — print ~5 formatted examples per genre,
-   the token count per genre, and confirm each tag encodes to one id.
+2. ~~Data location~~ **DONE (2026-10-15).**
+   - `tlm/config.py` has `DATA_ROOT` (`TLM_DATA_DIR`, default
+     `~/tlm-data/`) and `data_dir(dataset)`. Like `checkpoint_dir()`, it
+     falls back to the repo's `data/<dataset>/` when a dataset only
+     exists there, so Stages 1–3 work unmoved.
+   - `train.py`, `generate.py` and all three older prepare scripts use
+     it, so fresh setups write everything to `~/tlm-data/`.
+   - Also done: the venv moved out of OneDrive to
+     `C:\Users\lkmcg\tlm-venv` (see README notes).
+3. ~~`data/prepare_mixtape.py`~~ **WRITTEN AND TESTED (2026-10-15).**
+   It has five resumable stages (download, format, tokenizer, encode,
+   mix) plus `inspect`, and `--small` / `--genres` for test runs.
+   - **Where things go:** raw files in `~/tlm-data/mixtape-raw/`
+     (shared by small and full runs); everything else in
+     `~/tlm-data/mixtape/`: `formatted/<genre>.txt`,
+     `tokens/<genre>.bin` + `.lens.npy`, `tokenizer.json`, `train.bin`,
+     `val.bin`, `val_<genre>.bin`, `stats.json`. Re-mixing with
+     different shares only needs `train.bin` deleted and `mix` re-run.
+   - **Changes from the original design:**
+     - *Tokenizer speed:* `BPETokenizer.train()` recounts every pair on
+       every merge, which would take hours on real English, so
+       `tokenizer.py` gained `count_words()` and `train_fast()`.
+       `train_fast()` keeps pair counts between merges and uses a heap.
+       Checked on TinyStories: every merge it picks is the true most
+       frequent pair; it differs from `train()` only in how ties break;
+       it's 43× faster.
+     - *Plain ASCII:* everything is reduced to ASCII. Curly quotes and
+       dashes are mapped, accents stripped (NFKD), and documents more
+       than 1–3% non-ASCII are dropped (other languages). There's also
+       a cheap English check (" the / and / of / to" ≥ 3% of words).
+       This keeps the base alphabet at ~95 characters instead of
+       spending vocabulary on every Unicode symbol.
+     - *Chunking:* long texts are cut at paragraph breaks into ≤ 3,500
+       characters (~850 tokens), each piece repeating the tag + title (or
+       prompt). This now applies to stories too: long WritingPrompts
+       stories are chunked like books instead of truncated, which keeps
+       their endings.
+     - *Wikipedia:* 10 of the 41 shards, picked at random with a fixed
+       seed. Skips list/index/outline/disambiguation pages, cuts
+       articles at the first reference-type heading (See also,
+       References, ...), and tidies what stripped non-Latin script
+       leaves behind (empty parentheses).
+     - *Books:* hard-wrapped lines are re-joined, `_italics_`
+       underscores are dropped, and the first and last 2% of each book
+       (front matter, indexes, publishers' ads) are skipped. Titles come
+       from PG-19's metadata and include the author ("... by Mark
+       Twain"), so the author can be named in a prompt.
+     - *Reviews:* Pet Supplies, Toys and Games, and Grocery and Gourmet
+       Food (~21.6 GB of reviews + ~5.6 GB of product data).
+       - keep-rates by rating 1/1/1/0.6/0.2, which brings 5-star down
+         from ~65% to ~30%
+       - reviews need ≥ 20 words
+       - product names are cut to 15 words
+       - each file is sampled evenly from start to end, because the
+         files are grouped by user
+     - *WritingPrompts:* all splits are used (we make our own
+       validation split). The `[ WP ]`-style tags are stripped, prompts
+       are detokenized, and NSFW-tagged prompts are dropped.
+   - **Test run (`--small`, four genres):** ~4.25M training tokens, at
+     3.9–4.1 characters/token. The tags each encode to one id
+     (16378–16383), and `mixtape-smoke` trains on it: per-genre val
+     losses print and land in `log.csv`, and samples rotate through the
+     prompt bank.
+   - **Full run, download + format done 2026-10-16** (log:
+     `~/tlm-data/mixtape-prep.log`). ~33 GB downloaded in ~30 min
+     (~20 MB/s); four genres formatted in ~17 min into 9.6 GB:
+
+     | genre | docs | formatted | note |
+     |---|---|---|---|
+     | wiki | 1,542,142 | 3,469 MB | 8 shards came up ~10% short; raised to 10 |
+     | book | 1,048,278 | 3,289 MB | 9,280 books downloaded |
+     | review | 5,270,548 | 2,525 MB | kept 37 / 49 / 56% of Pet / Toys / Grocery lines |
+     | story | 412,625 | 955 MB | ~1 pass of the 250M share |
+
+     The tokenizer, encode and mix stages are waiting on RecipeNLG (the
+     manual download).
+   - **New presets:** `mixtape`, `mixtape-pilot`, and `mixtape-smoke`
+     (the toy model for the `--small` data). `MIXTAPE_PROMPTS` in
+     `config.py` is the training prompt bank.
+4. **Inspect before training** —
+   `python data\prepare_mixtape.py inspect` prints 3 random documents
+   per genre, the special-token ids and the mix stats.
 5. **Pilot (`mixtape-pilot`, ~500 steps)** — measure tok/s against the
    5,000 gate and peak memory (`torch.cuda.max_memory_allocated`). Pick
    the micro-batch size and set `max_steps`.
@@ -262,7 +326,7 @@ every genre evolving. They also go into the app's idea bank (below).
 <|recipe|> Title: Grandma's Emergency Lasagna
 <|story|> Prompt: Your cat has been secretly running a small country.
 <|recipe|> Title: The French Revolution                    (collision)
-<|review|> Category: Tools and Home Improvement\nProduct: The Moon\nRating: 2/5   (collision)
+<|review|> Category: Toys and Games\nProduct: The Moon\nRating: 2/5               (collision)
 <|wiki|> Title: Grandma's Emergency Lasagna                (collision)
 ```
 
@@ -300,8 +364,10 @@ idea, press Generate, and watch the text appear word by word.
   the desktop. On this PC the desktop is redirected to
   `C:\Users\lkmcg\OneDrive\Desktop`, so the script asks Windows for the
   real Desktop folder instead of assuming `~/Desktop`.
-- The shortcut runs `..\.venv\Scripts\pythonw.exe -m tlm.gui` from the
-  repo folder. `pythonw` means no console window.
+- The shortcut runs `pythonw.exe -m tlm.gui` from the repo folder, using
+  the Python of whichever venv ran the script (`sys.executable`'s
+  folder; here `C:\Users\lkmcg\tlm-venv`). `pythonw` means no console
+  window.
 - It has a custom icon, `assets/mixtape.ico` (a little cassette tape),
   drawn by `tools/make_icon.py`. That script uses only the standard
   library: Pillow isn't installed, and ICO files can hold raw pixels.
@@ -487,21 +553,47 @@ move items from "Coming" to "Ready" when they're built and tested.
   times (Intel Core Ultra 7 265). On the RTX 3050 6 GB, the Stage 3 model
   trains at ~32,700 tok/s vs ~1,250 on the CPU (~27×). On the CPU, fused
   attention is ~10% faster than the explicit version.
-- **Keep big things out of synced folders.** Checkpoints already default
-  to `~/tlm-checkpoints` (`TLM_CKPT_DIR`). Observed 2026-10-15: the venv
-  (`..\.venv`) sits inside OneDrive and is ~3 GB with the CUDA build, so
-  OneDrive syncs it. New setups should create the venv outside synced
-  folders.
+- **Keep big things out of synced folders.** Checkpoints default to
+  `~/tlm-checkpoints` (`TLM_CKPT_DIR`) and datasets to `~/tlm-data`
+  (`TLM_DATA_DIR`). The venv should live outside synced folders too: with
+  the CUDA build it's ~3 GB. Done 2026-10-15: the dev machine's venv
+  moved from `..\.venv` (inside OneDrive) to `C:\Users\lkmcg\tlm-venv`,
+  rebuilt from `pip freeze` plus `pyarrow`, because venvs can't simply be
+  moved. Setup commands for the README:
+  `python -m venv %USERPROFILE%\tlm-venv`, then
+  `%USERPROFILE%\tlm-venv\Scripts\activate` and the
+  `pip install -r requirements.txt ...` line above.
+
+- **Where datasets live:** `TLM_DATA_DIR`, default `~/tlm-data/`
+  (`%USERPROFILE%\tlm-data`). All prepare scripts write there, and
+  training and generation read from there. A dataset that only exists in
+  the repo's old `data/<name>/` folder is still found there, so older
+  setups keep working without moving anything. The README's Layout
+  section ("downloaded corpora land here") needs updating to match.
+- **New dependency `pyarrow`** (parquet reader, for the mixtape
+  sources). It's in `requirements.txt`.
+- **Mixtape data prep:**
+  - `python data\prepare_mixtape.py` runs all stages (download,
+    format, tokenizer, encode, mix). They can also be named one at a
+    time, every stage resumes, and `inspect` shows samples and stats.
+  - `--small` builds a ~5M-token test dataset (`mixtape-small`) in a
+    few minutes, and `python -m tlm.train --config mixtape-smoke`
+    trains a toy model on it.
+  - To change the mixture, edit `TRAIN_TOKENS` in the script, delete
+    `train.bin`, and re-run `mix`.
+- **RecipeNLG manual download:** from
+  https://recipenlg.cs.put.poznan.pl/, accept the terms, download
+  `dataset.zip`, and put it (or the `full_dataset.csv` inside) in
+  `~/tlm-data/mixtape-raw/recipenlg/`. Until then, the other genres
+  download and format, and the tokenizer stage waits for it.
 
 ### Coming (document when built)
 
-- `TLM_DATA_DIR` (default `~/tlm-data/`): datasets outside the repo and
-  OneDrive (step 2).
-- New dependency `pyarrow`, for reading parquet (step 3).
-- RecipeNLG manual download: where to get it, the terms to accept, and
-  where to put the zip (step 3).
-- `python data\prepare_mixtape.py`: run time, and the disk space needed
-  (tens of GB raw, ~5 GB of tokens) (step 3).
+- Mixtape disk space and run times. Measured so far, without RecipeNLG:
+  raw downloads 33 GB (~30 min), formatted text 9.6 GB (~17 min). Still
+  to measure: the RecipeNLG zip, the tokenizer, encode and mix times,
+  and the size of tokens/ and train.bin. Free disk should be ~60 GB
+  before starting.
 - Mixtape quickstart: pilot + train commands, ~4.2 days on the RTX 3050,
   peak memory, and the micro-batch the pilot settled on (steps 5–6).
 - Desktop app (step 7):

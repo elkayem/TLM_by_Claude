@@ -39,11 +39,12 @@ import truststore
 truststore.inject_into_ssl()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tlm.config import data_dir        # noqa: E402
 from tlm.tokenizer import BPETokenizer  # noqa: E402
 
 BASE = "https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/"
 FILES = {"train": "TinyStories-train.txt", "val": "TinyStories-valid.txt"}
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stories")
+OUT_DIR = data_dir("stories")   # ~/tlm-data/stories unless TLM_DATA_DIR
 VOCAB_SIZE = 4096
 BPE_SAMPLE_BYTES = 10 * 1024 * 1024   # train BPE on the first 10MB
 CHUNK_CHARS = 4 * 1024 * 1024         # encode in 4M-char chunks

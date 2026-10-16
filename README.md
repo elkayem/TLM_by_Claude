@@ -47,7 +47,9 @@ sample from the finished stories model:
 ## Quickstart
 
 All commands run from this `tlm/` directory, using the project venv
-(`..\.venv` — created during setup; activate it or call its python directly).
+(created during setup; activate it or call its python directly). Keep the
+venv outside synced folders like OneDrive: with the GPU build of PyTorch
+it's ~3 GB. The dev machine uses `%USERPROFILE%\tlm-venv`.
 
 ```
 # Stage 1 --------------------------------------------------------

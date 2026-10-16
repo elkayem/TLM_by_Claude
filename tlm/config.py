@@ -5,7 +5,7 @@ Everything that defines a training run lives in one dataclass. Rather than
 YAML files, we use plain Python: it's one fewer dependency, and you can see
 the defaults and their documentation in a single place.
 
-Three presets are defined at the bottom:
+Presets are defined at the bottom:
 
   smoke       - absurdly tiny, runs in seconds; only used to verify the
                 pipeline works end to end.
@@ -13,6 +13,10 @@ Three presets are defined at the bottom:
                 something entertaining in about an hour on CPU.
   stories     - Stage 2: BPE-tokenized model for TinyStories, ~9M params,
                 the long-weekend run.
+  instruct*   - Stage 3: instruction following on TinyStories-Instruct
+                (a fine-tune warm-up, a pilot, and the ~27M main run).
+  mixtape*    - Stage 4: ~126M params on five tagged genres of real
+                English, trained on the GPU (plus a pilot and a smoke test).
 """
 
 import os
@@ -28,6 +32,30 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CKPT_ROOT = os.environ.get(
     "TLM_CKPT_DIR",
     os.path.join(os.path.expanduser("~"), "tlm-checkpoints"))
+
+
+# Datasets live outside the repo for the same reason: the Stage 4 mixtape
+# needs tens of GB of downloads and a ~5GB token file. Override with the
+# TLM_DATA_DIR environment variable.
+DATA_ROOT = os.environ.get(
+    "TLM_DATA_DIR",
+    os.path.join(os.path.expanduser("~"), "tlm-data"))
+
+
+def data_dir(dataset):
+    """Resolve the folder holding a dataset (train.bin, val.bin,
+    tokenizer.json).
+
+    Datasets prepared before this setting existed live in the repo's
+    data/ folder and are found there when they don't exist under
+    DATA_ROOT, so Stages 1-3 keep working unmoved. New datasets go to
+    DATA_ROOT.
+    """
+    new = os.path.join(DATA_ROOT, dataset)
+    old = os.path.join(REPO_ROOT, "data", dataset)
+    if not os.path.isdir(new) and os.path.isdir(old):
+        return old
+    return new
 
 
 def checkpoint_dir(run_name):
@@ -88,14 +116,32 @@ class TLMConfig:
     eval_iters: int = 50      # batches to average for the val loss estimate
     sample_interval: int = 1000   # generate a text sample every N steps so
                                   # you can literally watch it learn
+    sample_prompts: tuple = ("\n",)  # what each sample starts from; with
+                                  # several, successive samples take turns
     checkpoint_interval: int = 1000  # save model to disk every N steps
 
     # ---------------------------------------------------------------- paths
-    dataset: str = "shakespeare"  # subdirectory of data/ holding the bins
+    dataset: str = "shakespeare"  # dataset folder (see data_dir() above)
     run_name: str = "tlm"         # checkpoints go to checkpoints/<run_name>/
 
     def to_dict(self):
         return asdict(self)
+
+
+# Training samples for the mixtape presets take turns through these, so the
+# log shows every genre (and a few deliberate genre collisions) evolving.
+MIXTAPE_PROMPTS = (
+    "<|wiki|> Title: The Great Spoon Shortage of 1874\n",
+    "<|book|> Title: The Adventures of a Reluctant Toaster\n",
+    "<|review|> Category: Pet Supplies\nProduct: Self-Heating Socks for "
+    "Cats\nRating: 1/5\n",
+    "<|recipe|> Title: Grandma's Emergency Lasagna\n",
+    "<|story|> Prompt: Your cat has been secretly running a small "
+    "country.\n",
+    "<|recipe|> Title: The French Revolution\n",
+    "<|review|> Category: Toys and Games\nProduct: The Moon\nRating: 2/5\n",
+    "<|wiki|> Title: Grandma's Emergency Lasagna\n",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -179,5 +225,48 @@ PRESETS = {
         eval_interval=500, eval_iters=50, sample_interval=1000,
         checkpoint_interval=1000, dropout=0.05,
         dataset="instruct", run_name="instruct",
+    ),
+
+    # ------------------------------------------------------ Stage 4 presets
+    # TLM-Mixtape: five genres of real English, each document tagged with
+    # a genre token (see data/prepare_mixtape.py and PLAN-stage4.md).
+
+    # ~126M params: GPT-2-small's width (768) with 16 layers instead of
+    # 12. 76k steps x 32,768 tokens = ~2.5B tokens = 20 tokens/param.
+    # Each optimizer step is 16 micro-batches of 2 x 1,024 tokens
+    # (grad_accum): the full 32k-token batch would never fit in the RTX
+    # 3050's 6 GB at once. No dropout: every source is seen about once,
+    # so there's nothing to memorize.
+    "mixtape": TLMConfig(
+        block_size=1024, n_layer=16, n_head=12, n_embd=768, dropout=0.0,
+        batch_size=2, grad_accum=16, max_steps=76000, warmup_steps=2000,
+        learning_rate=6e-4, min_lr=6e-5,
+        eval_interval=500, eval_iters=20, sample_interval=1000,
+        checkpoint_interval=1000,
+        sample_prompts=MIXTAPE_PROMPTS,
+        dataset="mixtape", run_name="mixtape",
+    ),
+
+    # Pilot: the same model for 500 steps, to measure tok/s and peak GPU
+    # memory before committing ~4 days (the gate is >= 5,000 tok/s).
+    "mixtape-pilot": TLMConfig(
+        block_size=1024, n_layer=16, n_head=12, n_embd=768, dropout=0.0,
+        batch_size=2, grad_accum=16, max_steps=500, warmup_steps=100,
+        learning_rate=6e-4, min_lr=6e-5,
+        eval_interval=100, eval_iters=10, sample_interval=250,
+        checkpoint_interval=250,
+        sample_prompts=MIXTAPE_PROMPTS,
+        dataset="mixtape", run_name="mixtape-pilot",
+    ),
+
+    # Pipeline check on the ~5M-token test dataset
+    # (python data\prepare_mixtape.py --small): a toy model, a minute.
+    "mixtape-smoke": TLMConfig(
+        block_size=256, n_layer=2, n_head=2, n_embd=64, dropout=0.0,
+        batch_size=4, grad_accum=2, max_steps=60, warmup_steps=10,
+        eval_interval=20, eval_iters=5, sample_interval=30,
+        checkpoint_interval=30,
+        sample_prompts=MIXTAPE_PROMPTS,
+        dataset="mixtape-small", run_name="mixtape-smoke",
     ),
 }

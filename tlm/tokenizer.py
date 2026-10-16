@@ -25,9 +25,10 @@ smarter tokenizer.
 See docs/01-tokenization.md for the full walkthrough.
 """
 
+import heapq
 import json
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 
 class CharTokenizer:
@@ -217,6 +218,119 @@ class BPETokenizer:
 
         # Final vocabulary: base characters first (sorted, for determinism),
         # then merged tokens in creation order, then special tokens last.
+        tokens = sorted(vocab) + [a + b for a, b in merges] + special_tokens
+        return cls(merges=merges,
+                   vocab={t: i for i, t in enumerate(tokens)},
+                   special_tokens=special_tokens)
+
+    @classmethod
+    def count_words(cls, text, special_tokens=()):
+        """Pre-tokenize `text` into a {word: count} Counter - the input
+        train_fast() expects. Counters from separate chunks of a big
+        corpus simply add up (c1 + c2), so the corpus never has to be one
+        string in memory."""
+        for tok in special_tokens:
+            text = text.replace(tok, "\n")
+        return Counter(cls._WORD_RE.findall(text))
+
+    @classmethod
+    def train_fast(cls, word_counts, vocab_size, special_tokens=None,
+                   min_count=1, verbose=True):
+        """The same algorithm as train(), with bookkeeping that scales.
+
+        train() recounts every pair in every word on every merge. That's
+        fine for TinyStories' few tens of thousands of unique words, and
+        hopeless for real English (Wikipedia, old books, reviews), which
+        has hundreds of thousands: hours per thousand merges. The fix is
+        what real BPE trainers do:
+
+          - keep the pair counts BETWEEN merges, and after merging (a, b)
+            update only the words that actually contain it - a small
+            fraction of the vocabulary each time;
+          - find the most frequent pair with a heap instead of scanning
+            every pair.
+
+        The merges come out the same as train()'s, except when two pairs
+        tie for most frequent: train() takes whichever it counted first,
+        this takes the alphabetically smaller one.
+
+        word_counts: {word: count}, e.g. summed count_words() Counters.
+        min_count:   ignore words seen fewer times than this. Rare words
+                     barely affect which merges win, and dropping them
+                     makes training much faster. (They still encode
+                     fine later, from the merges learned on the rest.)
+        """
+        special_tokens = special_tokens or []
+        # Base vocabulary from ALL words, before min_count pruning, so no
+        # character that appears in the corpus is left out.
+        vocab = {ch for w in word_counts for ch in w}
+        kept = [(w, c) for w, c in word_counts.items() if c >= min_count]
+        words = [list(w) for w, _ in kept]       # each word as a token list
+        counts = [c for _, c in kept]
+
+        # pair -> total count, and pair -> which words contain it.
+        pair_counts = defaultdict(int)
+        pair_words = defaultdict(set)
+        for i, w in enumerate(words):
+            for pair in zip(w, w[1:]):
+                pair_counts[pair] += counts[i]
+                pair_words[pair].add(i)
+
+        # Max-heap via negated counts. Counts change as merges happen; we
+        # never edit heap entries, we push a fresh one and skip stale ones
+        # when they surface (their count no longer matches).
+        heap = [(-c, pair) for pair, c in pair_counts.items()]
+        heapq.heapify(heap)
+
+        merges = []
+        while len(vocab) + len(merges) + len(special_tokens) < vocab_size:
+            while heap:
+                neg, pair = heapq.heappop(heap)
+                if pair_counts.get(pair) == -neg:
+                    break                   # a current entry: the winner
+            else:
+                break                       # nothing left to merge
+            a, b = pair
+            merged = a + b
+
+            # Rewrite only the words containing (a, b): take each word's
+            # old pairs out of the counts, merge, and put its new pairs
+            # in. (pair_words can list a word that no longer contains the
+            # pair - it changed in an earlier merge - so check.)
+            touched = set()
+            for i in pair_words.pop(pair):
+                w = words[i]
+                out, j = [], 0
+                while j < len(w):
+                    if j < len(w) - 1 and w[j] == a and w[j + 1] == b:
+                        out.append(merged)
+                        j += 2
+                    else:
+                        out.append(w[j])
+                        j += 1
+                if len(out) == len(w):
+                    continue                # stale entry: pair not here
+                c = counts[i]
+                for p in zip(w, w[1:]):
+                    pair_counts[p] -= c
+                    touched.add(p)
+                for p in zip(out, out[1:]):
+                    pair_counts[p] += c
+                    pair_words[p].add(i)
+                    touched.add(p)
+                words[i] = out
+
+            for p in touched:               # re-announce changed counts
+                if pair_counts[p] > 0:
+                    heapq.heappush(heap, (-pair_counts[p], p))
+                else:
+                    del pair_counts[p]
+            merges.append(pair)
+
+            if verbose and len(merges) % 1000 == 0:
+                print(f"  merge {len(merges)}: {pair!r} -> {merged!r} "
+                      f"(freq {-neg})", flush=True)
+
         tokens = sorted(vocab) + [a + b for a, b in merges] + special_tokens
         return cls(merges=merges,
                    vocab={t: i for i, t in enumerate(tokens)},

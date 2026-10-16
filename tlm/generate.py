@@ -22,12 +22,10 @@ import os
 
 import torch
 
-from .config import TLMConfig, checkpoint_dir
+from .config import TLMConfig, checkpoint_dir, data_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
 from .train import pick_device
-
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
@@ -68,7 +66,7 @@ def main():
     model.eval()
 
     tokenizer = load_tokenizer(
-        os.path.join(ROOT, "data", config.dataset, "tokenizer.json"))
+        os.path.join(data_dir(config.dataset), "tokenizer.json"))
 
     print(f"[{args.run}/{args.checkpoint} @ step {ckpt['step']}, "
           f"{model.num_params()/1e6:.2f}M params, {device}, "

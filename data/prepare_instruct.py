@@ -18,13 +18,13 @@ the data format.
 
 This script produces TWO datasets:
 
-  data/instruct/     - for the ~27M from-scratch run (and its pilot).
+  instruct/          - for the ~27M from-scratch run (and its pilot).
                        Fresh 4096-token BPE trained on this corpus, with
                        <|endoftext|> as a true SPECIAL TOKEN (one atomic
                        id - see tokenizer.py) so story boundaries are
                        exact and generation can stop itself.
 
-  data/instruct-ft/  - for fine-tuning the existing 7.4M stories model
+  instruct-ft/       - for fine-tuning the existing 7.4M stories model
                        (--config instruct-ft --init-from stories).
                        Encoded with the ORIGINAL stories tokenizer,
                        because a model's embeddings only make sense under
@@ -49,6 +49,7 @@ import truststore
 truststore.inject_into_ssl()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tlm.config import data_dir                         # noqa: E402
 from tlm.tokenizer import BPETokenizer, load_tokenizer   # noqa: E402
 from prepare_stories import download                     # noqa: E402
 
@@ -56,9 +57,9 @@ BASE = ("https://huggingface.co/datasets/roneneldan/TinyStoriesInstruct/"
         "resolve/main/")
 FILES = {"train": "TinyStories-Instruct-train.txt",
          "val": "TinyStories-Instruct-valid.txt"}
-DATA_DIR = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.join(DATA_DIR, "instruct")
-FT_DIR = os.path.join(DATA_DIR, "instruct-ft")
+# Output folders: ~/tlm-data/... by default (TLM_DATA_DIR overrides).
+OUT_DIR = data_dir("instruct")
+FT_DIR = data_dir("instruct-ft")
 
 VOCAB_SIZE = 4096
 EOT = "<|endoftext|>"
@@ -137,7 +138,7 @@ def main():
         print(f"instruct/{split}.bin: {n/1e6:,.1f}M tokens")
 
     # -- 4: encode the fine-tune slice with the STORIES tokenizer ------------
-    stories_tok_path = os.path.join(DATA_DIR, "stories", "tokenizer.json")
+    stories_tok_path = os.path.join(data_dir("stories"), "tokenizer.json")
     ft_tok_path = os.path.join(FT_DIR, "tokenizer.json")
     if not os.path.exists(ft_tok_path):
         shutil.copyfile(stories_tok_path, ft_tok_path)

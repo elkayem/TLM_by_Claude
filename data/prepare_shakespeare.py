@@ -33,12 +33,14 @@ import truststore
 truststore.inject_into_ssl()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from tlm.config import data_dir         # noqa: E402
 from tlm.tokenizer import CharTokenizer  # noqa: E402
 
 URL = ("https://raw.githubusercontent.com/karpathy/char-rnn/master/"
        "data/tinyshakespeare/input.txt")
-OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "shakespeare")
+# Output folder: ~/tlm-data/shakespeare by default (see data_dir() in
+# tlm/config.py; TLM_DATA_DIR overrides it).
+OUT_DIR = data_dir("shakespeare")
 
 
 def main():
