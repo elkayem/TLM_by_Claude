@@ -53,8 +53,9 @@ once, so there is nothing to memorize.
 
 **Budget:** 20 tokens/param ≈ **2.5B tokens** (Chinchilla). At ~907M
 FLOPs/token (6 × 126M + 151M for attention), that's ~2.3×10¹⁸ FLOPs.
-If step 1's measured ~6.2 TFLOPS holds at this size, it's ~6,800 tok/s
-and **~4.2 days**.
+If step 1's measured ~6.2 TFLOPS held at this size, that would be
+~6,800 tok/s and ~4.2 days. **The pilot measured ~9,300 tok/s, so ~3.1
+days** (step 5).
 
 Why deeper rather than the original 12-layer, 98M plan: the GPU turned
 out ~1.8× faster than estimated, so the 98M model on 2B tokens would
@@ -328,11 +329,26 @@ Directions:
    - In the first 20M tokens, `<|endoftext|>` (69,012) matches the sum
      of the five tags (69,013; one document is cut off at the end), so
      document boundaries are intact.
-5. **Pilot (`mixtape-pilot`, ~500 steps)** — measure tok/s against the
-   5,000 gate and peak memory (`torch.cuda.max_memory_allocated`). Pick
-   the micro-batch size and set `max_steps`.
-6. **Launch** `python -m tlm.train --config mixtape` (~4.2 days); journal
-   with the prompt bank.
+5. ~~Pilot~~ **DONE (2026-10-16): gate passed.** 500 steps × 32,768
+   tokens in 29 min 20 s (log in JOURNAL.md).
+   - **Speed:** 9,213–9,492 tok/s sustained, ~9,300 on average,
+     including evals, samples and checkpoint saves. That's ~8.5 TFLOPS
+     (~63% of the bf16 peak), better than step 1's 6.2, because the
+     bigger matrices keep the GPU busier. The gate was ≥ 5,000.
+   - **Memory:** 3.73 GB peak allocated at micro-batch 2, plus ~0.4 GB of
+     CUDA context. Micro-batch 4 would need ~1.7 GB more, which is too
+     tight beside the desktop's share of the 6 GB, so **keep
+     micro-batch 2 × grad_accum 16**. `max_steps` stays 76,000.
+   - **Full run:** 2.5B tokens / ~9,300 tok/s ≈ **74 h ≈ 3.1 days**
+     (the plan said ~4.2). A checkpoint every 1,000 steps ≈ every hour,
+     ~1.6 GB each (best.pt + latest.pt ≈ 3.2 GB).
+   - **Losses at step 499:** recipe 3.06 < review 4.34 < story 5.03 <
+     book 5.28 < wiki 5.48. Formulaic text is learned first. The first
+     sample (step 250) already stopped by itself at `<|endoftext|>`.
+6. **Launch** `python -m tlm.train --config mixtape` (~3.1 days); journal
+   with the prompt bank. Start it in its own console window, not as a
+   child of a Claude session, so closing the app can't stop it. Check
+   the power settings (no sleep) first; `--resume` after any restart.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
@@ -502,7 +518,7 @@ Sample ideas (the full pool gets written along with the app):
   a queue that the window polls with `after()`.
 - **Model:** loads `mixtape/best.pt` from the checkpoint folder, and the
   status line shows its step and val loss. **Reload** picks up a newer
-  best.pt, so during the ~4-day run you can watch the model get funnier.
+  best.pt, so during the ~3-day run you can watch the model get funnier.
   If there's no model yet, the window says how to train one instead of
   crashing.
 - **Device:** Auto uses the GPU only if it has ≥ 1.5 GB free
@@ -571,7 +587,7 @@ Sample ideas (the full pool gets written along with the app):
 ## Logistics
 
 - Same drill as Stages 2–3: no sleep, `--resume` after any restart.
-  Checkpoint every 1,000 steps (~80 min at ~6,800 tok/s).
+  Checkpoint every 1,000 steps (~1 hour at the measured ~9,300 tok/s).
 - The GPU also drives the display: the desktop stays usable but may lag.
   Avoid games and video work during the run.
 - Push commits to `origin/master` as work lands
@@ -684,7 +700,8 @@ move items from "Coming" to "Ready" when they're built and tested.
 
 ### Coming (document when built)
 
-- Mixtape quickstart: pilot + train commands, ~4.2 days on the RTX 3050,
-  peak memory, and the micro-batch the pilot settled on (steps 5–6).
+- Mixtape quickstart: the pilot and train commands. Measured on the RTX
+  3050: pilot ~30 min, ~9,300 tok/s, 3.73 GB peak at micro-batch 2;
+  full run ~3.1 days. Add the final loss and samples after step 6.
 - README table: a Stage 4 column, a device row (CPU vs GPU timings), and
   the new references (step 8).

@@ -936,3 +936,37 @@ Story: Once upon a time, there was a little boy named Timmy. Timmy loved to play
 Features: Dialogue
 Story: Once upon a time, there was a boy named Timmy. Timmy loved to play outside with his toys. He liked to play outside and found a pretty tree. Timmy had a shiny red ball and he was on the sky. He wanted to eat his dad to fly and went to the ball and wanted to help. Timmy said, they could make it
 ```
+
+## Stage 4 — mixtape pilot (2026-10-16)
+
+The real Stage 4 model (`mixtape-pilot`: 126M params, 16 layers x 768,
+1,024-token context, 16k vocab) for 500 steps x 32,768 tokens, to measure
+speed and memory before the full run. ~9,300 tok/s sustained (the gate was
+5,000), peak GPU memory 3.73 GB at micro-batch 2. Recipes are the easiest
+genre from the start; Wikipedia the hardest.
+
+```
+config: mixtape-pilot | params: 125.99M | vocab: 16384 | tokens/step: 32,768
+device: NVIDIA GeForce RTX 3050 | bf16 autocast: True
+step      0 | lr 6.00e-06 | train 9.5954 | val 9.5792 | 3,899 tok/s | elapsed 0:00:08 | mem 2.82GB
+             val by genre: book 9.6039 | recipe 9.4537 | review 9.6256 | story 9.5967 | wiki 9.6413
+step    100 | lr 6.00e-04 | train 6.0101 | val 5.6676 | 9,391 tok/s | elapsed 0:05:57 | mem 3.73GB
+             val by genre: book 6.1175 | recipe 4.2516 | review 5.6102 | story 6.0053 | wiki 6.5889
+step    200 | lr 5.21e-04 | train 5.1132 | val 5.5038 | 9,215 tok/s | elapsed 0:11:52 | mem 3.73GB
+             val by genre: book 5.6362 | recipe 3.6231 | review 4.9543 | story 5.5144 | wiki 6.1019
+step    300 | lr 3.30e-04 | train 5.2291 | val 4.8584 | 9,213 tok/s | elapsed 0:17:48 | mem 3.73GB
+             val by genre: book 5.4381 | recipe 3.2914 | review 4.5839 | story 5.3151 | wiki 5.7565
+step    400 | lr 1.39e-04 | train 5.1428 | val 4.8486 | 9,366 tok/s | elapsed 0:23:38 | mem 3.73GB
+             val by genre: book 5.4295 | recipe 3.0235 | review 4.4749 | story 5.0167 | wiki 5.5043
+step    499 | lr 6.00e-05 | train 4.5599 | val 5.1074 | 9,492 tok/s | elapsed 0:29:20 | mem 3.73GB
+             val by genre: book 5.2816 | recipe 3.0630 | review 4.3434 | story 5.0322 | wiki 5.4836
+done. best val loss 4.8486. total training time 0:29:20. checkpoints in C:\Users\lkmcg\tlm-checkpoints\mixtape-pilot
+```
+
+The first prompt-bank sample, at step 250 (15 minutes in):
+
+```
+<|wiki|> Title: The Great Spoon Shortage of 1874
+In December.
+In the Sol was an American of the first at the team was a series of The group of the final of the first of the same year, the government.
+```
