@@ -66,7 +66,9 @@ doesn't attempt.
 ## How to read this project
 
 Suggested order:
-1. Skim all eight chapters once, fast, tolerating confusion.
+1. Skim chapters 1–8 once, fast, tolerating confusion. (Chapters 9 and
+   10 are Stage 4 — the GPU and the five-genre Mixtape — and read best
+   after the rest.)
 2. Read `model.py` top to bottom with chapters 2–5 open beside it.
 3. Run the Stage 1 training and *watch* it — the samples every 500 steps
    are the concepts becoming visible.

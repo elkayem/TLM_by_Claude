@@ -399,13 +399,31 @@ Directions:
        was logged as an error
      - the gibberish smoke model sometimes emitted a genre tag
        mid-text, which is why generation now stops at any tag
-8. **Docs + README** — `docs/09-gpu.md` (devices, mixed precision, fused
-   attention, gradient accumulation) and `docs/10-mixtape.md` (data
-   mixtures, control tokens, collisions, plus the KV cache). Add a Stage 4
-   README column, quickstart lines (including
-   `python tools/make_shortcut.py`), and verified references (CTRL, PG-19,
-   RecipeNLG, WritingPrompts, Amazon Reviews 2023, Wikipedia). Then fold
-   in everything from "README notes" at the end of this plan.
+8. **Docs + README — WRITTEN 2026-10-16, results pending.**
+   - `docs/09-gpu.md` (Stage 4a: devices, bf16 mixed precision, fused
+     attention, gradient accumulation, and the calibration that proved
+     the port) and `docs/10-mixtape.md` (the five genres, building a
+     mixture, per-genre validation, control tokens and collisions,
+     `train_fast`, the KV cache and the app). `docs/00-overview.md` points
+     at both.
+   - README:
+     - a fourth column in the models table
+     - a new **Setup** section (venv outside OneDrive, the two PyTorch
+       builds, the driver check, `--device`, where data and checkpoints
+       live)
+     - Stage 4 quickstart lines with data-prep notes (RecipeNLG and its
+       mirror, disk and time, re-mixing)
+     - long-run notes (the launcher)
+     - a **Mixtape app** section
+     - chapters 9–10 in the tour, an updated layout
+     - 9 new references (Wikipedia, PG-19, Amazon Reviews 2023,
+       RecipeNLG, WritingPrompts, FlashAttention, CTRL, mixed precision,
+       Muennighoff et al.). Every link was fetched and its title checked.
+   - Every "Ready" item from the README notes below is now folded in.
+   - **Still to fill in after the run** (placeholders say "TBD"): the
+     Stage 4 training time and best val loss in the README table, and
+     the "Results" section of `docs/10-mixtape.md` (final losses per
+     genre, prompt-bank samples, which collisions worked).
 
 ## Prompt bank (samples during training + journal)
 
@@ -588,6 +606,31 @@ Sample ideas (the full pool gets written along with the app):
 
 ## Later / optional
 
+- **Validate the GPU time estimates for Stages 1–3** (the README table's
+  † entries, added 2026-10-16). Do it once the GPU is free, i.e. after
+  the mixtape run.
+
+  | stage | CPU (measured) | GPU estimate | basis |
+  |---|---|---|---|
+  | 1 `shakespeare` | 2 h (~5,700 tok/s) | ~10 min | 19.5 MFLOP/token × 41M tokens at ~1.5–2.5 TFLOPS, plus eval/sample overhead |
+  | 2 `stories` | 55.7 h (~2,450 tok/s) | ~2–3 h | 50.3 MFLOP/token × 492M tokens at ~2.5–4 TFLOPS |
+  | 3 `instruct` | 118 h (~1,250 tok/s) | ~4.5 h | 188.7 MFLOP/token × 533M tokens at the measured 6.2 TFLOPS (calibration pilot: 32,700 tok/s) |
+
+  Method:
+  - run each preset on the GPU with
+    `TLM_CKPT_DIR=~/tlm-checkpoints/gpu-validation`, so the existing CPU
+    checkpoints aren't touched (train.py refuses to overwrite them
+    anyway)
+  - Stage 1 in full (~10 min)
+  - Stages 2 and 3 for ~2,000 steps each, extrapolating the sustained
+    tok/s from the last eval lines; the tok/s column already includes
+    eval and sample overhead
+  - optionally a full Stage 2 run (~2–3 h), which also tests whether the
+    GPU run reaches the CPU run's val loss of 1.595
+
+  Then replace the "(est.)" entries in the README with the measured
+  times, add a line to the journal, and record the measured TFLOPS per
+  model size: they show how GPU efficiency falls as models get smaller.
 - More tags: SimpleStories (`<|tiny|>`, with style/persona dials),
   FineWeb-Edu (`<|web|>`), r/Jokes (small and crude, fine-tune only).
 - Bits-per-byte as the reported loss, which compares across tokenizers
@@ -611,7 +654,9 @@ soon as it exists, so the README update (step 8) is a copy-edit rather
 than an archaeology dig. Add to this list whenever something changes;
 move items from "Coming" to "Ready" when they're built and tested.
 
-### Ready to document (built and tested)
+### Ready to document (built and tested) — all folded into the README on 2026-10-16
+
+(Kept here as the record; new items go below this list, or under "Coming".)
 
 - **Two PyTorch builds; pick one.** Both commands are in
   `requirements.txt`:
@@ -711,13 +756,12 @@ move items from "Coming" to "Ready" when they're built and tested.
 
 ### Coming (document when built)
 
-- Mixtape training launcher (built 2026-10-16; document once the run
-  finishes): double-click `tools\train_mixtape.cmd`. It starts the run or
-  resumes it automatically and logs to `~/tlm-data/mixtape-train.log`.
-  `TLM_PYTHON` overrides the venv python (default
-  `%USERPROFILE%\tlm-venv`).
-- Mixtape quickstart: the pilot and train commands. Measured on the RTX
-  3050: pilot ~30 min, ~9,300 tok/s, 3.73 GB peak at micro-batch 2;
-  full run ~3.1 days. Add the final loss and samples after step 6.
-- README table: a Stage 4 column, a device row (CPU vs GPU timings), and
-  the new references (step 8).
+The launcher, the Stage 4 quickstart commands, the README table column
+and the new references were also folded in on 2026-10-16. Left for after
+the run (~2026-10-19):
+
+- README table, Stage 4: the actual training time and best val loss
+  (replacing the "TBD" placeholders).
+- `docs/10-mixtape.md` "Results": the final overall and per-genre val
+  losses, prompt-bank samples, and which collisions worked.
+- JOURNAL.md: the run's samples, from `~/tlm-data/mixtape-train.log`.
