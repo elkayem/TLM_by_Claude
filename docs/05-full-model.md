@@ -93,8 +93,11 @@ rethinks* — good next reads once this code feels obvious:
   token where a cache makes it O(T). Correct, just wasteful; fine at toy
   scale, unthinkable in production.
 - **FlashAttention** (`F.scaled_dot_product_attention`): computes exactly
-  our four attention lines but never materializes the T×T matrix. We write
-  the explicit version because *seeing* the matrix is the point.
+  our four attention lines but never materializes the T×T matrix. Since
+  Stage 4 (the GPU port), TLM calls it by default for speed. The explicit
+  version stays in `CausalSelfAttention.explicit_attention()` because
+  *seeing* the matrix is the point; set `fused_attention=False` in the
+  config to train with it.
 - Mixture-of-experts, grouped-query attention, sliding-window attention:
   all efficiency plays on the same skeleton.
 

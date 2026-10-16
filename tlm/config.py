@@ -61,9 +61,19 @@ class TLMConfig:
     dropout: float = 0.1      # regularization: randomly zero activations
                               # during training so the model can't over-rely
                               # on any single pathway. 0.0 = disabled.
+    fused_attention: bool = True  # use PyTorch's one-kernel attention
+                              # (same math, far less memory on a GPU).
+                              # False = the explicit step-by-step version in
+                              # model.py, slower but identical in result.
 
     # ------------------------------------------------------------- training
-    batch_size: int = 32      # sequences per optimizer step
+    batch_size: int = 32      # sequences per forward/backward pass
+    grad_accum: int = 1       # GRADIENT ACCUMULATION: forward/backward
+                              # this many batches, summing their gradients,
+                              # before each optimizer step. The step then
+                              # sees batch_size * grad_accum sequences - a
+                              # big batch that never has to fit in GPU
+                              # memory all at once.
     max_steps: int = 5000     # total optimizer steps to train for
     learning_rate: float = 3e-4   # peak LR after warmup
     min_lr: float = 3e-5          # LR floor at the end of cosine decay

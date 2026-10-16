@@ -904,3 +904,35 @@ The fox and the rabbits listened for a long time. They became the best of friend
 <|endoftext|>
 
 Once upon a time, there was a small boy who wanted to fly even higher than the others. He asked his mom to take him, but she said no. He was very sad. Suddenly, an amazing thing happened. A very bright light filled the air and the boy was filled with amazement. He saw a huge helicopter. He was so excited! He quickly hopped inside and started to fly it. The helicopter was so beautiful and he flew all around. He was so proud of himself. He had gotten to fly.
+## Stage 4 — GPU calibration (2026-10-15)
+
+First run on the RTX 3050: the Stage 3 pilot (`instruct-pilot`, 27.3M params),
+repeated on the GPU to check the port. The loss curve tracks the CPU pilot
+within noise, at ~27x the speed (CPU: 6.7 s/step, ~1,220 tok/s).
+
+```
+config: instruct-pilot | params: 27.32M | vocab: 4096 | tokens/step: 8,192
+device: NVIDIA GeForce RTX 3050 | bf16 autocast: True
+step      0 | lr 3.00e-06 | train 8.3753 | val 8.3759 | 2,805 tok/s | elapsed 0:00:02 | mem 1.90GB
+step    100 | lr 3.00e-04 | train 4.4391 | val 4.4466 | 32,529 tok/s | elapsed 0:00:28 | mem 2.13GB
+step    200 | lr 2.92e-04 | train 3.9395 | val 3.9350 | 30,036 tok/s | elapsed 0:00:55 | mem 2.13GB
+step    300 | lr 2.68e-04 | train 3.6442 | val 3.6415 | 32,425 tok/s | elapsed 0:01:20 | mem 2.13GB
+step    400 | lr 2.32e-04 | train 3.4237 | val 3.3787 | 32,780 tok/s | elapsed 0:01:45 | mem 2.13GB
+step    500 | lr 1.88e-04 | train 3.2051 | val 3.2281 | 32,672 tok/s | elapsed 0:02:10 | mem 2.13GB
+step    600 | lr 1.42e-04 | train 3.1055 | val 3.0964 | 25,332 tok/s | elapsed 0:02:43 | mem 2.13GB
+step    700 | lr 9.75e-05 | train 3.0228 | val 2.9975 | 31,696 tok/s | elapsed 0:03:08 | mem 2.13GB
+step    800 | lr 6.16e-05 | train 2.9044 | val 2.9437 | 31,059 tok/s | elapsed 0:03:35 | mem 2.13GB
+step    900 | lr 3.81e-05 | train 2.8815 | val 2.8933 | 32,522 tok/s | elapsed 0:04:00 | mem 2.13GB
+step    999 | lr 3.00e-05 | train 2.8124 | val 2.8702 | 32,675 tok/s | elapsed 0:04:25 | mem 2.13GB
+done. best val loss 2.8702. total training time 0:04:27. checkpoints in C:/Users/lkmcg/tlm-checkpoints/gpu-calibration\instruct-pilot
+```
+
+Sample at step 500 (just over 2 minutes into training):
+
+```
+Story: Once upon a time, there was a little boy named Timmy. Timmy loved to play outside. One day, Timmy's mom told him to the park to go outside to catch him.
+"Hi, Timmy," said Timmy. "But Timmy's mommy replied, Timmy. Timmy's dad said. Timmy's go to the park, he met a big, and his friend, he had a walk, and they played together. Timmy went home, and he saw a big dog. Timmy and ran to the dog again. Timmy felt sad and wanted to share his friend.
+<|endoftext|>
+Features: Dialogue
+Story: Once upon a time, there was a boy named Timmy. Timmy loved to play outside with his toys. He liked to play outside and found a pretty tree. Timmy had a shiny red ball and he was on the sky. He wanted to eat his dad to fly and went to the ball and wanted to help. Timmy said, they could make it
+```

@@ -25,6 +25,7 @@ import torch
 from .config import TLMConfig, checkpoint_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
+from .train import pick_device
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -46,7 +47,11 @@ def main():
                         help="set for reproducible output")
     parser.add_argument("--ignore-eos", action="store_true",
                         help="keep generating past <|endoftext|>")
+    parser.add_argument("--device", default="auto",
+                        choices=["auto", "cuda", "cpu"],
+                        help="where to run (default: the GPU if there is one)")
     args = parser.parse_args()
+    device = pick_device(args.device)
 
     if args.seed is not None:
         torch.manual_seed(args.seed)
@@ -54,24 +59,27 @@ def main():
     # Rebuild the exact model that was trained: the checkpoint stores its
     # config, so architecture and weights always match.
     ckpt_path = os.path.join(checkpoint_dir(args.run), args.checkpoint)
-    ckpt = torch.load(ckpt_path, weights_only=True)
+    # (map_location: checkpoints saved on the GPU load fine on the CPU.)
+    ckpt = torch.load(ckpt_path, weights_only=True, map_location="cpu")
     config = TLMConfig(**ckpt["config"])
     model = TLM(config)
     model.load_state_dict(ckpt["model"])
+    model.to(device)
     model.eval()
 
     tokenizer = load_tokenizer(
         os.path.join(ROOT, "data", config.dataset, "tokenizer.json"))
 
     print(f"[{args.run}/{args.checkpoint} @ step {ckpt['step']}, "
-          f"{model.num_params()/1e6:.2f}M params, "
+          f"{model.num_params()/1e6:.2f}M params, {device}, "
           f"temp={args.temperature}, top_k={args.top_k}, "
           f"top_p={args.top_p}]\n")
 
     ids = tokenizer.encode(args.prompt)
     if not ids:  # empty/unknown prompt: fall back to a newline seed
         ids = tokenizer.encode("\n")
-    ctx = torch.tensor([ids], dtype=torch.long)   # shape (1, T): batch of 1
+    ctx = torch.tensor([ids], dtype=torch.long,   # shape (1, T): batch of 1
+                       device=device)
 
     # If the tokenizer has a true <|endoftext|> token, stop generation when
     # the model emits it - the model itself decides where the story ends.

@@ -26,6 +26,7 @@ watch the model learn. See docs/06-training.md.
 """
 
 import argparse
+import contextlib
 import csv
 import math
 import os
@@ -43,7 +44,41 @@ from .tokenizer import load_tokenizer
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def get_batch(data, config, generator):
+def pick_device(requested):
+    """'auto' means the GPU when PyTorch can see one, else the CPU.
+
+    Everything else in this file is device-agnostic: the model and each
+    batch are moved to `device`, and PyTorch runs the same code on
+    whichever processor holds the tensors.
+    """
+    if requested == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise SystemExit("--device cuda, but PyTorch can't see a GPU "
+                         "(is the CUDA build of torch installed?)")
+    return requested
+
+
+def autocast_for(device):
+    """MIXED PRECISION, GPU only.
+
+    Inside this context, matrix multiplies run in bfloat16: 16-bit floats
+    with the same exponent range as 32-bit ones but fewer digits of
+    precision. A GPU's tensor cores do bf16 math several times faster
+    than fp32 and the activations take half the memory. The weights
+    themselves (and the optimizer's arithmetic) stay fp32, and precision-
+    sensitive ops like softmax and the loss are automatically kept in fp32
+    - that's the "mixed" part. Because bf16 has fp32's range, no loss
+    scaling is needed (unlike the older float16 recipe).
+
+    On the CPU we change nothing, so CPU runs behave exactly as before.
+    """
+    if device == "cuda" and torch.cuda.is_bf16_supported():
+        return torch.autocast(device_type="cuda", dtype=torch.bfloat16)
+    return contextlib.nullcontext()
+
+
+def get_batch(data, config, generator, device):
     """Sample a random batch of training examples from the token stream.
 
     `data` is a numpy memmap of the ENTIRE tokenized corpus as one long
@@ -66,6 +101,13 @@ def get_batch(data, config, generator):
         data[i:i + config.block_size].astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy(
         data[i + 1:i + 1 + config.block_size].astype(np.int64)) for i in ix])
+    if device == "cuda":
+        # Batches are built in CPU memory, then copied to the GPU.
+        # pin_memory() puts them in page-locked RAM the GPU can read
+        # directly, and non_blocking=True lets the copy run while the CPU
+        # moves on to queueing the next piece of work.
+        x = x.pin_memory().to(device, non_blocking=True)
+        y = y.pin_memory().to(device, non_blocking=True)
     return x, y
 
 
@@ -92,7 +134,7 @@ def get_lr(step, config):
 
 
 @torch.no_grad()
-def estimate_loss(model, splits, config, generator):
+def estimate_loss(model, splits, config, generator, device, autocast):
     """Average the loss over eval_iters random batches per split.
 
     A single batch's loss is noisy (it depends on which slices you drew);
@@ -108,8 +150,9 @@ def estimate_loss(model, splits, config, generator):
     for name, data in splits.items():
         losses = torch.zeros(config.eval_iters)
         for i in range(config.eval_iters):
-            x, y = get_batch(data, config, generator)
-            _, loss = model(x, y)
+            x, y = get_batch(data, config, generator, device)
+            with autocast:
+                _, loss = model(x, y)
             losses[i] = loss.item()
         out[name] = losses.mean().item()
     model.train()  # dropout back on
@@ -163,8 +206,14 @@ def main():
     parser.add_argument("--patience", type=int, default=None, metavar="N",
                         help="stop if val loss sets no new best for N "
                              "consecutive evals (default: run to the end)")
+    parser.add_argument("--device", default="auto",
+                        choices=["auto", "cuda", "cpu"],
+                        help="where to train (default: the GPU if there "
+                             "is one)")
     args = parser.parse_args()
     config = PRESETS[args.config]
+    device = pick_device(args.device)
+    autocast = autocast_for(device)
 
     torch.manual_seed(1337)
     # Dedicated RNG for batch sampling so resumed runs don't replay the
@@ -186,10 +235,19 @@ def main():
     config.vocab_size = tokenizer.vocab_size
 
     # ---- model & optimizer
-    model = TLM(config)
+    # The weights are initialized on the CPU (under the seed above, so a
+    # GPU run starts from exactly the same weights a CPU run would), then
+    # moved to the training device in one go.
+    model = TLM(config).to(device)
+    tokens_per_step = config.batch_size * config.block_size * config.grad_accum
     print(f"config: {args.config} | params: {model.num_params()/1e6:.2f}M | "
           f"vocab: {config.vocab_size} | "
-          f"tokens/step: {config.batch_size * config.block_size:,}")
+          f"tokens/step: {tokens_per_step:,}")
+    if device == "cuda":
+        print(f"device: {torch.cuda.get_device_name()} | "
+              f"bf16 autocast: {torch.cuda.is_bf16_supported()}")
+    else:
+        print("device: cpu")
 
     # FINE-TUNING (--init-from): instead of random weights, start from a
     # model trained on something else and continue training on THIS
@@ -201,7 +259,10 @@ def main():
     # different tokenizer would scramble every token's meaning.
     if args.init_from and not args.resume:
         src_path = os.path.join(checkpoint_dir(args.init_from), "best.pt")
-        src = torch.load(src_path, weights_only=True)
+        # map_location="cpu": load onto the CPU whatever device saved it;
+        # load_state_dict then copies the values into the model wherever
+        # it lives. So checkpoints move freely between CPU and GPU runs.
+        src = torch.load(src_path, weights_only=True, map_location="cpu")
         for key in ("vocab_size", "block_size", "n_layer", "n_head", "n_embd"):
             assert src["config"][key] == getattr(config, key), (
                 f"can't fine-tune: {key} differs "
@@ -222,10 +283,13 @@ def main():
         if not p.requires_grad:
             continue
         (decay if p.dim() >= 2 and "emb" not in name else no_decay).append(p)
+    # fused=True (GPU only): update every weight in one kernel launch
+    # instead of a loop of small ones - same math, less overhead.
     optimizer = torch.optim.AdamW(
         [{"params": decay, "weight_decay": config.weight_decay},
          {"params": no_decay, "weight_decay": 0.0}],
-        lr=config.learning_rate, betas=(0.9, 0.95))
+        lr=config.learning_rate, betas=(0.9, 0.95),
+        fused=(device == "cuda"))
 
     # ---- checkpointing / resume
     ckpt_dir = checkpoint_dir(config.run_name)
@@ -238,8 +302,9 @@ def main():
     start_step, best_val = 0, float("inf")
     elapsed_before = 0.0   # training time accumulated in previous sessions
     if args.resume and os.path.exists(ckpt_path):
-        ckpt = torch.load(ckpt_path, weights_only=True)
+        ckpt = torch.load(ckpt_path, weights_only=True, map_location="cpu")
         model.load_state_dict(ckpt["model"])
+        # the optimizer moves its saved state onto each weight's device
         optimizer.load_state_dict(ckpt["optimizer"])
         start_step, best_val = ckpt["step"] + 1, ckpt["best_val"]
         elapsed_before = ckpt.get("elapsed", 0.0)
@@ -269,14 +334,22 @@ def main():
         for group in optimizer.param_groups:
             group["lr"] = lr
 
-        # (1) sample a batch
-        x, y = get_batch(splits["train"], config, generator)
-        # (2) forward: predictions + loss
-        _, loss = model(x, y)
-        # (3) backward: populate .grad on every parameter.
         # zero_grad first because backward() ACCUMULATES into .grad.
         optimizer.zero_grad(set_to_none=True)
-        loss.backward()
+        # Steps (1)-(3) run grad_accum times per optimizer step (once for
+        # every preset before Stage 4). Because backward() accumulates,
+        # the micro-batches' gradients add up in .grad; dividing each loss
+        # by grad_accum makes the sum the gradient of the AVERAGE loss -
+        # exactly what one big batch would have produced.
+        for _ in range(config.grad_accum):
+            # (1) sample a batch
+            x, y = get_batch(splits["train"], config, generator, device)
+            # (2) forward: predictions + loss
+            with autocast:
+                _, loss = model(x, y)
+            # (3) backward: add this batch's share to .grad on every
+            # parameter.
+            (loss / config.grad_accum).backward()
         # Gradient clipping: if the overall gradient vector is longer than
         # grad_clip, rescale it to that length. Direction is kept; only
         # the size of the step is capped. Insurance against the occasional
@@ -285,17 +358,21 @@ def main():
         # (4) apply the update
         optimizer.step()
 
-        tokens_since += config.batch_size * config.block_size
+        tokens_since += tokens_per_step
 
         # ---- periodic evaluation & logging
         if step % config.eval_interval == 0 or step == config.max_steps - 1:
-            losses = estimate_loss(model, splits, config, generator)
+            losses = estimate_loss(model, splits, config, generator,
+                                   device, autocast)
             dt = time.time() - t0
             tps = tokens_since / dt if dt > 0 else 0.0
             elapsed = elapsed_before + (time.time() - session_start)
+            # peak GPU memory so far: how close we are to the 6 GB ceiling
+            mem = (f" | mem {torch.cuda.max_memory_allocated() / 1e9:.2f}GB"
+                   if device == "cuda" else "")
             print(f"step {step:6d} | lr {lr:.2e} | "
                   f"train {losses['train']:.4f} | val {losses['val']:.4f} | "
-                  f"{tps:,.0f} tok/s | elapsed {fmt_hms(elapsed)}")
+                  f"{tps:,.0f} tok/s | elapsed {fmt_hms(elapsed)}{mem}")
             with open(log_path, "a", newline="") as f:
                 csv.writer(f).writerow(
                     [step, f"{lr:.2e}", f"{losses['train']:.4f}",
@@ -319,9 +396,11 @@ def main():
 
         # ---- periodic sample: watch the model learn to write
         if step > 0 and step % config.sample_interval == 0:
-            ctx = torch.tensor([tokenizer.encode("\n")], dtype=torch.long)
-            out = model.generate(ctx, max_new_tokens=200, temperature=0.8,
-                                 top_k=50)
+            ctx = torch.tensor([tokenizer.encode("\n")], dtype=torch.long,
+                               device=device)
+            with autocast:
+                out = model.generate(ctx, max_new_tokens=200,
+                                     temperature=0.8, top_k=50)
             model.train()  # generate() switched to eval mode
             print("-" * 60)
             print(tokenizer.decode(out[0].tolist()))

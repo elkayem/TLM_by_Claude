@@ -31,8 +31,13 @@ character consistency. Stage 3 crosses from *completing* text to *following
 instructions* — same loss, differently formatted data (see
 [docs/08-instruct.md](docs/08-instruct.md)) — and adds fine-tuning: the 7.4M
 stories model gets adapted to the instruct format as a warm-up baseline.
-The Stage 1/2 numbers are measured results from an Intel Core Ultra 7 265
-(20 cores, no GPU) — a sample from the finished stories model:
+The Stage 1–3 numbers are measured results from the CPU of an Intel Core
+Ultra 7 265 (20 cores). The machine has since gained an NVIDIA RTX 3050
+(6 GB), and TLM now trains on it automatically when the CUDA build of
+PyTorch is installed (see `requirements.txt`; `--device cpu` forces the
+CPU). On the Stage 3 model it runs ~27× faster: 32,700 vs ~1,250 tok/s,
+so the 5-day run becomes ~4.5 hours (see PLAN-stage4.md). Here's a
+sample from the finished stories model:
 
 > Once upon a time, there was a little girl named Lily. She loved to play
 > with her toys and eat candy. One day, she went to the park to play with
@@ -101,7 +106,8 @@ Then read in order, next to the code file each chapter covers:
 tlm/
 ├── README.md            you are here
 ├── JOURNAL.md           training diary: samples as the models learned
-├── PLAN-stage3.md       what's next: instruction-following (~25M params)
+├── PLAN-stage3.md       instruction-following (~25M params), done
+├── PLAN-stage4.md       what's next: the GPU port + TLM-Mixtape (~100M)
 ├── docs/                the textbook + architecture figure
 ├── tlm/
 │   ├── config.py        all hyperparameters + presets

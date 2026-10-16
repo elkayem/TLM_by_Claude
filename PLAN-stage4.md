@@ -34,10 +34,13 @@ a few rotating humorous ideas or type your own, and watch it write.
   ~5.3 GB of memory free with the Windows desktop running (it also drives
   the display).
 - Intel Core Ultra 7 265 (20 cores), 16 GB RAM, ~185 GB free on C:.
-- The venv has **torch 2.13.0+cpu**, so the CUDA build must be installed.
-- Throughput estimate: ~10–20× the CPU. Stage 3's 118 h would take
-  ~6–12 h. **These are estimates, not measurements** — the calibration
-  pilot (step 1) replaces them with real numbers.
+- The venv now has **torch 2.13.0+cu130** (the CUDA 13.0 build; it was
+  2.13.0+cpu).
+- **Measured (step 1):** the Stage 3 model trains at **32,700 tok/s**
+  sustained, evals included, against the CPU's ~1,220–1,285. That's
+  **~27×**, better than the 10–20× estimated. At ~189M FLOPs/token it's
+  ~6.2 TFLOPS sustained, ~46% of peak. Stage 3's 118 h would now take
+  ~4.5 h.
 
 ## Proposed design
 
@@ -47,9 +50,20 @@ n_embd=768, block_size=1024, vocab 16,384 → ~85M params in blocks +
 a smaller vocab. dropout=0.0: every source is seen about once, so there
 is nothing to memorize.
 
-**Budget:** 20 tokens/param ≈ **2B tokens** (Chinchilla). At an estimated
-~700M FLOPs/token, that's ~1.4×10¹⁸ FLOPs, or ~5 days at a sustained
-~3.5 TFLOPS.
+**Budget:** 20 tokens/param ≈ **2B tokens** (Chinchilla). At ~700M
+FLOPs/token, that's ~1.4×10¹⁸ FLOPs. The original estimate assumed
+~3.5 TFLOPS sustained, i.e. ~5 days. If the measured ~6.2 TFLOPS holds
+at this size, it's **~2.6 days**.
+
+**Open decision (settle at the step-5 pilot):** the faster GPU leaves
+room to grow the model.
+- **(a)** Keep 98M on 2B tokens: ~2.6 days, with time to spare for
+  reruns.
+- **(b)** Go deeper: n_layer=16 at the same width (~126M params) on
+  ~2.5B tokens (20 tok/param), ~906M FLOPs/token, so ~4.2 days. This is
+  tighter on memory (≈ 2 GB of weights + optimizer state), so expect
+  micro-batch 2–4. The mixture shares stay the same; recipes would get
+  ~1.25 passes.
 
 **Batching:** micro-batch 4 × 1024 tokens, gradient accumulation × 8 =
 32,768 tokens per optimizer step → **max_steps 61,000** (≈ 2.0B tokens).
@@ -58,10 +72,11 @@ as before. Micro-batch 4 is a guess at what fits in 6 GB (see Risks); the
 pilot picks the real value, and the accumulation count adjusts to keep
 32k tokens/step.
 
-**Gate (same idea as Stage 3's):** the pilot must sustain **≥ 4,000
-tok/s** (≤ ~5.8 days). If not, fall back to n_layer=10, n_embd=640 (~60M
-params) and keep the ~5-day budget. That trains past 20 tokens/param,
-which is fine; small models routinely are.
+**Gate (same idea as Stage 3's):** for the 98M model, the pilot must
+sustain **≥ 4,000 tok/s** (≤ ~5.8 days). Step 1's measurement predicts
+~8,800. If it falls short, drop to n_layer=10, n_embd=640 (~60M params)
+and keep the ~5-day budget. That trains past 20 tokens/param, which is
+fine; small models routinely are.
 
 **Tokenizer:** new from-scratch BPE, vocab 16,384, trained on a balanced
 sample of all five genres (~20 MB each; Stage 3 used 10 MB for 4,096 —
@@ -165,28 +180,43 @@ Directions:
 
 ## Order of work
 
-1. **GPU port + calibration (Stage 4a)** — useful on its own, and every
-   later step depends on it.
-   - Install the CUDA build of PyTorch into `../.venv` (multi-GB
-     download). Update the install note in `requirements.txt`. The CPU
-     path must keep working.
+1. ~~GPU port + calibration (Stage 4a)~~ **DONE (2026-10-15).**
+   - torch 2.13.0+cu130 is installed.
    - `train.py`:
-     - pick the device (cuda if available, else cpu) and move the model
-       and batches there (pinned memory, non_blocking)
-     - bf16 autocast on the forward pass
-     - gradient accumulation (new config field)
-     - extra val splits for the per-genre losses
-     - samples drawn from the prompt bank (below) instead of "\n"
-   - `model.py`: train with `F.scaled_dot_product_attention` (fused
-     kernel, never builds the T×T matrix). Keep the hand-written attention
-     as the documented reference path behind a flag, with a check that
-     both give the same output.
-   - `generate.py`: device support.
-   - Calibration: run `instruct-pilot` on the GPU for ~400 steps. Val loss
-     at steps 100/200/300/400 should track the CPU pilot's log (4.43 /
-     3.93 / 3.63 / 3.45) within noise. Record tok/s against the CPU's
-     1,220. Optional: the full `instruct` config overnight should land
-     near val 1.257.
+     - `--device auto|cuda|cpu` (auto = GPU if visible)
+     - bf16 autocast (GPU only; the CPU path is unchanged)
+     - pinned-memory batch copies
+     - fused AdamW
+     - `grad_accum` config field (default 1)
+     - peak GPU memory in the eval line
+     - `map_location="cpu"` loads, so checkpoints move between devices
+   - `model.py`: `F.scaled_dot_product_attention` by default, with the
+     explicit version kept as `explicit_attention()` behind
+     `fused_attention`.
+   - `generate.py`: `--device`.
+   - Checks, on the Stage 3 best.pt with one fixed val batch:
+     - every CPU/GPU × explicit/fused combination gives loss 1.21786
+       exactly; bf16 gives 1.21799
+     - grad accumulation (2×8) matches one batch of 16 to 1.5e-5
+     - fused attention: 2× faster and half the memory of explicit
+       (41k vs 22k tok/s; 2.4 vs 4.3 GB) in a micro-benchmark
+     - a CPU checkpoint resumes on the GPU with fused AdamW
+   - Calibration (`instruct-pilot`, 1,000 steps, checkpoints under
+     `~/tlm-checkpoints/gpu-calibration/`):
+
+     | step | CPU train / val | GPU train / val |
+     |---|---|---|
+     | 100 | 4.4319 / 4.4325 | 4.4391 / 4.4466 |
+     | 200 | 3.9372 / 3.9255 | 3.9395 / 3.9350 |
+     | 300 | 3.6468 / 3.6341 | 3.6442 / 3.6415 |
+     | 400 | 3.4285 / 3.4506 | 3.4237 / 3.3787 |
+
+     The curves track within eval noise (20-batch estimates). All 1,000
+     steps took **4 min 27 s at 32,700 tok/s**, peaking at 2.13 GB of
+     GPU memory. The CPU took 6.7 s/step, ~1 h 52 min for the same
+     1,000 steps.
+   - Moved to step 3, because they need the mixtape data: per-genre val
+     splits, and samples drawn from the prompt bank.
 2. **Data location** — raw downloads (tens of GB) and the ~4 GB bin must
    NOT live in the repo: the repo is in OneDrive, which would upload all
    of it. Add a `TLM_DATA_DIR` env var / default `~/tlm-data/`, mirroring
@@ -199,7 +229,10 @@ Directions:
    `pyarrow` (parquet). Measure encode speed on a sample first:
    Wikipedia and books have far more distinct words than TinyStories, so
    the tokenizer's word cache will help less. Parallelize across the 20
-   cores if needed. Manual step: the RecipeNLG download.
+   cores if needed. Manual step: the RecipeNLG download. Also the two
+   `train.py` pieces carried over from step 1: evaluate every
+   `val_<genre>.bin` alongside `val.bin`, and draw training samples from
+   the prompt bank instead of "\n".
 4. **Inspect before training** — print ~5 formatted examples per genre,
    the token count per genre, and confirm each tag encodes to one id.
 5. **Pilot (`mixtape-pilot`, ~500 steps)** — measure tok/s against the

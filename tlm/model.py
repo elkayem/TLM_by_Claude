@@ -68,6 +68,8 @@ class CausalSelfAttention(nn.Module):
 
         self.attn_dropout = nn.Dropout(config.dropout)
         self.resid_dropout = nn.Dropout(config.dropout)
+        self.dropout = config.dropout       # the fused kernel takes it raw
+        self.fused = config.fused_attention
 
         # THE CAUSAL MASK. A lower-triangular matrix of ones:
         #   position 0 may see: [0]
@@ -104,7 +106,38 @@ class CausalSelfAttention(nn.Module):
         v = v.view(B, T, self.n_head, hs).transpose(1, 2)  # (B, H, T, hs)
 
         # ---- THE ATTENTION EQUATION:  softmax(q k^T / sqrt(hs)) v --------
-        #
+        # Written out one step at a time in explicit_attention() below -
+        # read that first; it's the real explanation. By default, though,
+        # we call PyTorch's FUSED version, scaled_dot_product_attention:
+        # the identical equation and causal mask, computed in one
+        # optimized kernel. On a GPU it never builds the (B, H, T, T)
+        # score matrix in memory at all - it streams through it in tiles
+        # ("FlashAttention"-style) - which saves a lot of memory and time.
+        # Same answer up to rounding; set fused_attention=False in the
+        # config to train with the explicit version instead.
+        if self.fused:
+            y = F.scaled_dot_product_attention(
+                q, k, v, is_causal=True,
+                dropout_p=self.dropout if self.training else 0.0)
+        else:
+            y = self.explicit_attention(q, k, v)       # (B, H, T, hs)
+
+        # RE-ASSEMBLE THE HEADS: (B, H, T, hs) -> (B, T, H, hs) -> (B, T, C)
+        # (undoing the earlier split), then mix them with the output
+        # projection. .contiguous() makes the memory layout match the new
+        # axis order so .view() can flatten it.
+        y = y.transpose(1, 2).contiguous().view(B, T, C)
+        return self.resid_dropout(self.out_proj(y))
+
+    def explicit_attention(self, q, k, v):
+        """softmax(q k^T / sqrt(hs)) v, one step at a time.
+
+        q, k, v: (B, H, T, hs). Returns (B, H, T, hs). This is the
+        reference implementation; forward() normally uses the fused
+        kernel, which computes exactly these four steps.
+        """
+        T, hs = q.size(-2), q.size(-1)
+
         # Step 1: raw scores. q @ k^T computes ALL query-key dot products
         # at once: att[b, h, i, j] = q_i . k_j = "how relevant is token j
         # to token i, according to head h". Shape: (B, H, T, T) - a full
@@ -135,14 +168,7 @@ class CausalSelfAttention(nn.Module):
         # Step 4: use those probabilities to take a weighted average of the
         # value vectors. y[b, h, i] = sum_j att[i, j] * v[j]. This is the
         # actual information transfer.
-        y = att @ v                                        # (B, H, T, hs)
-
-        # RE-ASSEMBLE THE HEADS: (B, H, T, hs) -> (B, T, H, hs) -> (B, T, C)
-        # (undoing the earlier split), then mix them with the output
-        # projection. .contiguous() makes the memory layout match the new
-        # axis order so .view() can flatten it.
-        y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.resid_dropout(self.out_proj(y))
+        return att @ v                                     # (B, H, T, hs)
 
 
 class MLP(nn.Module):
