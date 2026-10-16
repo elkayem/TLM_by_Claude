@@ -1,6 +1,6 @@
 # Stage 4 plan — TLM-Mixtape (draft, 2026-10-15)
 
-Goal: train a ~100M-param model on the new GPU, on a **blend of five
+Goal: train a ~126M-param model on the new GPU, on a **blend of five
 genres of real English**, each example tagged with a genre token
 (`<|wiki|>`, `<|book|>`, `<|review|>`, `<|recipe|>`, `<|story|>`). The tag
 tells the model which voice to write in. That's the "control code" idea
@@ -44,39 +44,36 @@ a few rotating humorous ideas or type your own, and watch it write.
 
 ## Proposed design
 
-**Model (`mixtape` preset):** n_layer=12, n_head=12 (head size 64),
-n_embd=768, block_size=1024, vocab 16,384 → ~85M params in blocks +
-~13M tied embedding + ~0.8M positions ≈ **98M**. GPT-2-small shape with
-a smaller vocab. dropout=0.0: every source is seen about once, so there
-is nothing to memorize.
+**Model (`mixtape` preset) — decided 2026-10-15: the deeper option.**
+n_layer=16, n_head=12 (head size 64), n_embd=768, block_size=1024,
+vocab 16,384 → ~113M params in blocks + ~13M tied embedding (+ ~0.8M
+positions, not counted) ≈ **126M**. It's GPT-2-small's width with four
+more layers and a smaller vocab. dropout=0.0: every source is seen about
+once, so there is nothing to memorize.
 
-**Budget:** 20 tokens/param ≈ **2B tokens** (Chinchilla). At ~700M
-FLOPs/token, that's ~1.4×10¹⁸ FLOPs. The original estimate assumed
-~3.5 TFLOPS sustained, i.e. ~5 days. If the measured ~6.2 TFLOPS holds
-at this size, it's **~2.6 days**.
+**Budget:** 20 tokens/param ≈ **2.5B tokens** (Chinchilla). At ~907M
+FLOPs/token (6 × 126M + 151M for attention), that's ~2.3×10¹⁸ FLOPs.
+If step 1's measured ~6.2 TFLOPS holds at this size, it's ~6,800 tok/s
+and **~4.2 days**.
 
-**Open decision (settle at the step-5 pilot):** the faster GPU leaves
-room to grow the model.
-- **(a)** Keep 98M on 2B tokens: ~2.6 days, with time to spare for
-  reruns.
-- **(b)** Go deeper: n_layer=16 at the same width (~126M params) on
-  ~2.5B tokens (20 tok/param), ~906M FLOPs/token, so ~4.2 days. This is
-  tighter on memory (≈ 2 GB of weights + optimizer state), so expect
-  micro-batch 2–4. The mixture shares stay the same; recipes would get
-  ~1.25 passes.
+Why deeper rather than the original 12-layer, 98M plan: the GPU turned
+out ~1.8× faster than estimated, so the 98M model on 2B tokens would
+have finished in ~2.6 days. The extra layers use the remaining days, and
+the 98M shape stays as the fallback.
 
-**Batching:** micro-batch 4 × 1024 tokens, gradient accumulation × 8 =
-32,768 tokens per optimizer step → **max_steps 61,000** (≈ 2.0B tokens).
-Peak LR 6e-4 → 6e-5 cosine, 2,000 warmup steps, other optimizer settings
-as before. Micro-batch 4 is a guess at what fits in 6 GB (see Risks); the
-pilot picks the real value, and the accumulation count adjusts to keep
-32k tokens/step.
+**Batching:** micro-batch 2 × 1024 tokens, gradient accumulation × 16 =
+32,768 tokens per optimizer step → **max_steps 76,000** (≈ 2.49B
+tokens). Peak LR 6e-4 → 6e-5 cosine, 2,000 warmup steps, other
+optimizer settings as before. Micro-batch 2 is what step 1's memory
+measurement predicts will fit (see Risks). If the pilot shows room for 3
+or 4, raise it and lower the accumulation count, keeping ~32k
+tokens/step.
 
-**Gate (same idea as Stage 3's):** for the 98M model, the pilot must
-sustain **≥ 4,000 tok/s** (≤ ~5.8 days). Step 1's measurement predicts
-~8,800. If it falls short, drop to n_layer=10, n_embd=640 (~60M params)
-and keep the ~5-day budget. That trains past 20 tokens/param, which is
-fine; small models routinely are.
+**Gate (same idea as Stage 3's):** the pilot must sustain **≥ 5,000
+tok/s** (≤ ~5.8 days). Step 1's measurement predicts ~6,800, but the
+small micro-batch may cost some efficiency, and the pilot will tell. If
+it falls short, fall back to the 12-layer, 98M shape on 2B tokens (same
+mixture shares; max_steps 61,000).
 
 **Tokenizer:** new from-scratch BPE, vocab 16,384, trained on a balanced
 sample of all five genres (~20 MB each; Stage 3 used 10 MB for 4,096 —
@@ -84,21 +81,22 @@ time a 20 MB run first). Special tokens: `<|endoftext|>` plus the five
 genre tags. `BPETokenizer.train(..., special_tokens=[...])` already
 takes a list, so no tokenizer changes are needed.
 
-## The mixture (~2B tokens)
+## The mixture (~2.5B tokens)
 
 | Tag | Source | Share | Tokens | How much of the source |
 |---|---|---|---|---|
-| wiki | English Wikipedia | 30% | 600M | a random slice of articles |
-| book | PG-19 (Gutenberg books published before 1919) | 25% | 500M | ~1/5 of the books |
-| review | Amazon Reviews 2023, 3–4 categories | 20% | 400M | a few categories |
-| recipe | RecipeNLG | 15% | 300M | ~one full pass (estimate) |
-| story | WritingPrompts | 10% | 200M | most of one pass |
+| wiki | English Wikipedia | 30% | 750M | a random slice of articles |
+| book | PG-19 (Gutenberg books published before 1919) | 25% | 625M | ~1/4 of the books |
+| review | Amazon Reviews 2023, 3–4 categories | 20% | 500M | a few categories |
+| recipe | RecipeNLG | 15% | 375M | ~1.25 passes (estimate) |
+| story | WritingPrompts | 10% | 250M | about one pass |
 
 **Why this split:** Wikipedia and books are the backbone (55%). The
 collisions only work if the model knows about things — a recipe for "The
 French Revolution" is only funny if it knows guillotines and baguettes.
 The three funny formats get far more than their natural share of text.
-The two small sources get about one pass so the model learns their
+The two small sources get one pass or a little more (repeating data up
+to ~4 times is nearly as good as fresh data), so the model learns their
 *format* without memorizing particular recipes or stories. Shares are a
 starting proposal; adjust them after looking at the prep's token counts.
 
@@ -106,7 +104,7 @@ starting proposal; adjust them after looking at the prep's token counts.
 documents from each source until that source hits its token target,
 shuffles at the document level, and concatenates. `get_batch` stays as
 it is (random windows ≈ one pass over the bin). At 16-bit ids that's
-~4 GB on disk. Validation: ~1–2M held-out tokens per genre, written to
+~5 GB on disk. Validation: ~1–2M held-out tokens per genre, written to
 `val_<genre>.bin` plus a combined `val.bin`, so the log shows which
 genres the model is learning fastest.
 
@@ -144,7 +142,7 @@ Directions:
 
 - **wiki** — HF `wikimedia/wikipedia`, config `20231101.en` (6.41M
   articles; CC BY-SA 3.0 / GFDL). Download only enough parquet shards for
-  600M tokens after sampling. Probably skip "List of ..." pages (mostly
+  750M tokens after sampling. Probably skip "List of ..." pages (mostly
   tables) and very short stubs.
 - **book** — PG-19 (Rae et al. 2019; Apache 2.0, books public domain):
   HF `deepmind/pg19` or the `deepmind-gutenberg` GCS bucket. 28,602 train
@@ -217,7 +215,7 @@ Directions:
      1,000 steps.
    - Moved to step 3, because they need the mixtape data: per-genre val
      splits, and samples drawn from the prompt bank.
-2. **Data location** — raw downloads (tens of GB) and the ~4 GB bin must
+2. **Data location** — raw downloads (tens of GB) and the ~5 GB bin must
    NOT live in the repo: the repo is in OneDrive, which would upload all
    of it. Add a `TLM_DATA_DIR` env var / default `~/tlm-data/`, mirroring
    `TLM_CKPT_DIR`, and resolve old datasets in-repo as `checkpoint_dir()`
@@ -236,11 +234,11 @@ Directions:
 4. **Inspect before training** — print ~5 formatted examples per genre,
    the token count per genre, and confirm each tag encodes to one id.
 5. **Pilot (`mixtape-pilot`, ~500 steps)** — measure tok/s against the
-   4,000 gate and peak memory (`torch.cuda.max_memory_allocated`). Pick
+   5,000 gate and peak memory (`torch.cuda.max_memory_allocated`). Pick
    the micro-batch size and set `max_steps`.
-6. **Launch** `python -m tlm.train --config mixtape` (~5 days); journal
+6. **Launch** `python -m tlm.train --config mixtape` (~4.2 days); journal
    with the prompt bank.
-7. **The Mixtape app** — build it while the 5-day run trains. It only
+7. **The Mixtape app** — build it while the ~4-day run trains. It only
    needs a checkpoint (the step-5 pilot's is enough to develop against),
    and `best.pt` keeps improving underneath it. Includes the KV cache and
    streaming generation (see the app section).
@@ -249,7 +247,8 @@ Directions:
    mixtures, control tokens, collisions, plus the KV cache). Add a Stage 4
    README column, quickstart lines (including
    `python tools/make_shortcut.py`), and verified references (CTRL, PG-19,
-   RecipeNLG, WritingPrompts, Amazon Reviews 2023, Wikipedia).
+   RecipeNLG, WritingPrompts, Amazon Reviews 2023, Wikipedia). Then fold
+   in everything from "README notes" at the end of this plan.
 
 ## Prompt bank (samples during training + journal)
 
@@ -371,7 +370,7 @@ Sample ideas (the full pool gets written along with the app):
   a queue that the window polls with `after()`.
 - **Model:** loads `mixtape/best.pt` from the checkpoint folder, and the
   status line shows its step and val loss. **Reload** picks up a newer
-  best.pt, so during the 5-day run you can watch the model get funnier.
+  best.pt, so during the ~4-day run you can watch the model get funnier.
   If there's no model yet, the window says how to train one instead of
   crashing.
 - **Device:** Auto uses the GPU only if it has ≥ 1.5 GB free
@@ -401,16 +400,22 @@ Sample ideas (the full pool gets written along with the app):
 - **Speed** is estimated from the datasheet; steps 1 and 5 measure it.
   `torch.compile` isn't planned (Windows support is uncertain); if it
   works, it's a bonus.
-- **Memory:** 6 GB with ~0.8 GB taken by the desktop. Rough budget at
-  micro-batch 4:
-  - weights + gradients + AdamW state ≈ 1.6 GB
-  - activations ≈ 1.0–1.3 GB
-  - logits over a 16k vocab ≈ 0.5–0.8 GB (temporary)
-  - CUDA context ≈ 0.4 GB
+- **Memory:** 6 GB with ~0.8 GB taken by the desktop, so ~5.3 GB
+  usable. Step 1 measured ~42 bytes of activations per layer × token ×
+  channel: the Stage 3 pilot peaked at 2.13 GB, of which ~0.44 GB was
+  weights and optimizer state and ~0.3 GB logits. Scaled to the 126M
+  model:
+  - weights + gradients + AdamW state ≈ 2.0 GB
+  - activations: ~1.0 GB at micro-batch 2, ~2.1 GB at micro-batch 4
+  - logits over a 16k vocab: ~0.3 GB at micro-batch 2, ~0.6 GB at 4
+  - CUDA context ≈ 0.4 GB (not counted in `max_memory_allocated`)
 
-  That's ~4 GB total, so micro-batch 8 probably won't fit.
-- **Checkpoints** grow to ~1.2 GB each (weights + AdamW state), so
-  best.pt + latest.pt ≈ 2.4 GB. That's fine outside OneDrive.
+  That's ~3.7 GB at micro-batch 2, which fits, and ~5.1 GB at 4, which
+  is too tight. If even 2 won't fit, activation checkpointing (recompute
+  instead of store, ~30% slower) is the fallback before shrinking the
+  model.
+- **Checkpoints** grow to ~1.5 GB each (fp32 weights + AdamW state), so
+  best.pt + latest.pt ≈ 3 GB. That's fine outside OneDrive.
 - **Licenses:** Amazon (unstated), RecipeNLG (unknown) and WritingPrompts
   (Reddit) → data and weights stay local, as now (gitignored). Wikipedia
   is CC BY-SA.
@@ -434,8 +439,77 @@ Sample ideas (the full pool gets written along with the app):
 ## Logistics
 
 - Same drill as Stages 2–3: no sleep, `--resume` after any restart.
-  Checkpoint every 1,000 steps (~2 h at the estimated speed).
+  Checkpoint every 1,000 steps (~80 min at ~6,800 tok/s).
 - The GPU also drives the display: the desktop stays usable but may lag.
   Avoid games and video work during the run.
 - Push commits to `origin/master` as work lands
   (https://github.com/elkayem/TLM_by_Claude).
+
+## README notes: setup & configuration (running list)
+
+Every setup or configuration detail a new user would need goes here as
+soon as it exists, so the README update (step 8) is a copy-edit rather
+than an archaeology dig. Add to this list whenever something changes;
+move items from "Coming" to "Ready" when they're built and tested.
+
+### Ready to document (built and tested)
+
+- **Two PyTorch builds; pick one.** Both commands are in
+  `requirements.txt`:
+  - NVIDIA GPU: `pip install -r requirements.txt --extra-index-url
+    https://download.pytorch.org/whl/cu130` (~1.9 GB download, ~2.3 GB
+    installed)
+  - CPU only: the same with `.../whl/cpu`. Everything still works,
+    including Stages 1–3 exactly as they were trained.
+- **GPU driver requirement:** the cu130 build needs a driver that
+  supports CUDA 13.0. `nvidia-smi` shows the highest CUDA version the
+  driver supports (this PC: driver 616.92, CUDA 13.4). With an older
+  driver, pick an older build from the same index (e.g. `cu126`).
+- **Switching an existing CPU venv to the GPU build:**
+  `pip install "torch==2.13.0+cu130" --index-url
+  https://download.pytorch.org/whl/cu130` (replaces `2.13.0+cpu`).
+- **Check that the GPU is visible:** `python -c "import torch;
+  print(torch.__version__, torch.cuda.is_available())"` should print
+  `2.13.0+cu130 True`.
+- **Choosing the device:** `--device auto|cuda|cpu` on both `tlm.train`
+  and `tlm.generate`. `auto` (the default) uses the GPU when PyTorch can
+  see one, else the CPU. The training banner prints which one it picked.
+- **Moving between devices:** checkpoints work across CPU and GPU in both
+  directions, including `--resume` and `--init-from`.
+- **New config fields** (`tlm/config.py`), with defaults that keep old
+  presets and checkpoints working unchanged:
+  - `grad_accum` (default 1): micro-batches per optimizer step
+  - `fused_attention` (default True): False switches to the explicit
+    attention (same result, slower)
+- **GPU-only behavior:** bf16 mixed precision and fused AdamW. The
+  training log adds a `mem` column (peak GPU memory).
+- **Speed reference for the README table:** the Stage 1–3 times are CPU
+  times (Intel Core Ultra 7 265). On the RTX 3050 6 GB, the Stage 3 model
+  trains at ~32,700 tok/s vs ~1,250 on the CPU (~27×). On the CPU, fused
+  attention is ~10% faster than the explicit version.
+- **Keep big things out of synced folders.** Checkpoints already default
+  to `~/tlm-checkpoints` (`TLM_CKPT_DIR`). Observed 2026-10-15: the venv
+  (`..\.venv`) sits inside OneDrive and is ~3 GB with the CUDA build, so
+  OneDrive syncs it. New setups should create the venv outside synced
+  folders.
+
+### Coming (document when built)
+
+- `TLM_DATA_DIR` (default `~/tlm-data/`): datasets outside the repo and
+  OneDrive (step 2).
+- New dependency `pyarrow`, for reading parquet (step 3).
+- RecipeNLG manual download: where to get it, the terms to accept, and
+  where to put the zip (step 3).
+- `python data\prepare_mixtape.py`: run time, and the disk space needed
+  (tens of GB raw, ~5 GB of tokens) (step 3).
+- Mixtape quickstart: pilot + train commands, ~4.2 days on the RTX 3050,
+  peak memory, and the micro-batch the pilot settled on (steps 5–6).
+- Desktop app (step 7):
+  - `python tools\make_shortcut.py` creates the desktop shortcut and
+    finds a OneDrive-redirected Desktop by itself; re-run it if the repo
+    moves
+  - Tkinter ships with the python.org Windows installer (the "tcl/tk and
+    IDLE" option, on by default)
+  - where favorites and the app's log are written
+- README table: a Stage 4 column, a device row (CPU vs GPU timings), and
+  the new references (step 8).

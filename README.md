@@ -107,7 +107,7 @@ tlm/
 ├── README.md            you are here
 ├── JOURNAL.md           training diary: samples as the models learned
 ├── PLAN-stage3.md       instruction-following (~25M params), done
-├── PLAN-stage4.md       what's next: the GPU port + TLM-Mixtape (~100M)
+├── PLAN-stage4.md       what's next: the GPU port + TLM-Mixtape (~126M)
 ├── docs/                the textbook + architecture figure
 ├── tlm/
 │   ├── config.py        all hyperparameters + presets
