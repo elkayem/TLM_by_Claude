@@ -289,23 +289,89 @@ Directions:
      | review | 5,270,548 | 2,525 MB | kept 37 / 49 / 56% of Pet / Toys / Grocery lines |
      | story | 412,625 | 955 MB | ~1 pass of the 250M share |
 
-     The tokenizer, encode and mix stages are waiting on RecipeNLG (the
-     manual download).
+     **Finished 2026-10-16.** The official RecipeNLG site returned
+     "Internal Server Error", so we used the exact copy on Hugging Face
+     (`SandhyaKilari/RecipeNLG_dataset`, 2.29 GB CSV, same 2,231,142
+     rows and columns). It needed no code changes.
+     - **recipe format:** 1,631,468 "Gathered" recipes, 1,225 MB, in
+       1.4 min
+     - **tokenizer:** 5 × 10 MB sample, 203,400 unique words, the full
+       16,384 vocab in 0.1 min (`train_fast`); special ids
+       16378–16383
+     - **encode:** under 3 min for all five genres on 16 processes. At
+       3.82–4.02 chars/token: wiki 889.6M, book 842.4M, review 628.5M,
+       recipe 321.0M, story 240.2M tokens.
+     - **mix:** 8,605,776 documents shuffled into `train.bin` in 3.4 min
+
+     | genre | train tokens | share | passes | val tokens | tokens/doc |
+     |---|---|---|---|---|---|
+     | wiki | 749,999,879 | 30% | 0.84 | 1,500,411 | 577 |
+     | book | 624,999,801 | 25% | 0.74 | 1,500,118 | 804 |
+     | review | 499,999,980 | 20% | 0.80 | 1,500,016 | 119 |
+     | recipe | 374,999,931 | 15% | 1.17 | 1,500,053 | 197 |
+     | story | 249,999,570 | 10% | 1.05 | 1,500,159 | 582 |
+     | total | 2,499,999,161 | | | 7,500,757 | |
+
+     Disk: raw downloads 35 GB (including the 2.2 GB recipe CSV). The
+     dataset folder is 22 GB: formatted text 11 GB, tokens/ 5.5 GB,
+     `train.bin` 5.0 GB, val files 30 MB. ~109 GB free afterwards.
    - **New presets:** `mixtape`, `mixtape-pilot`, and `mixtape-smoke`
      (the toy model for the `--small` data). `MIXTAPE_PROMPTS` in
      `config.py` is the training prompt bank.
-4. **Inspect before training** —
+4. ~~Inspect before training~~ **DONE (2026-10-16).**
    `python data\prepare_mixtape.py inspect` prints 3 random documents
    per genre, the special-token ids and the mix stats.
+   - Recipes read cleanly (title, `- ingredient` lines, numbered
+     steps). The source's own quirks remain, e.g. a step split
+     mid-sentence ("cook onions in3 / 2. tablespoons oil").
+   - `train.bin`: every id is < 16,384.
+   - In the first 20M tokens, `<|endoftext|>` (69,012) matches the sum
+     of the five tags (69,013; one document is cut off at the end), so
+     document boundaries are intact.
 5. **Pilot (`mixtape-pilot`, ~500 steps)** — measure tok/s against the
    5,000 gate and peak memory (`torch.cuda.max_memory_allocated`). Pick
    the micro-batch size and set `max_steps`.
 6. **Launch** `python -m tlm.train --config mixtape` (~4.2 days); journal
    with the prompt bank.
-7. **The Mixtape app** — build it while the ~4-day run trains. It only
-   needs a checkpoint (the step-5 pilot's is enough to develop against),
-   and `best.pt` keeps improving underneath it. Includes the KV cache and
-   streaming generation (see the app section).
+7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
+   schedule, while waiting on RecipeNLG. Developed against the
+   `mixtape-smoke` model; it loads the real one once trained.
+   - **`model.py`:**
+     - `generate_stream()`: a KV cache plus a generator that yields one
+       token at a time. The cache restarts from the last 3/4 of the text
+       when the window fills, because learned positions can't slide.
+     - `sample_next()`: the temperature/top-k/top-p code, now shared
+       with `generate()`, which stays the simple documented version.
+     - Checked: with the same seed, both give the same tokens, on CPU
+       and GPU, with fused or explicit attention. 300 tokens on the
+       Stage 3 model: 4.5 → 1.5 s on the CPU, 1.5 → 0.75 s on the GPU.
+   - **`tlm/ideas.json`:** 248 ideas (48–50 per genre, ~27% mix-ups).
+   - **`tlm/gui.py`:**
+     - the genre pulldown, a per-genre form, and 4 clickable ideas from
+       a persistent shuffled deck; More ideas, Surprise me
+     - Creativity (temperature 0.5–1.2) and Length (150 / 300 / 600)
+     - streaming output with Stop; generation also stops at
+       `<|endoftext|>` or any genre tag
+     - Show what the model sees; Save to favorites; Copy
+     - a status line, a model line, and Reload model
+     - the GPU if ≥ 1.5 GB is free, else the CPU; Windows DPI-aware
+     - it loads the first of `mixtape`, `mixtape-pilot` and
+       `mixtape-smoke` that has a best.pt (`--run` / `--device`
+       override)
+   - **`tools/make_icon.py`:** draws the cassette into
+     `assets/mixtape.ico` (+ a `.png` preview) using the standard
+     library only.
+   - **`tools/make_shortcut.py`:** creates the shortcut through
+     PowerShell's WScript.Shell COM object. Created on this PC:
+     `C:\Users\lkmcg\OneDrive\Desktop\TLM Mixtape.lnk` → the
+     tlm-venv's `pythonw.exe -m tlm.gui`.
+   - **Tested:**
+     - an automated run: idea click, two genres, More ideas, Stop,
+       Surprise me, favorites, deck persistence, plus screenshots
+     - a real launch from the shortcut: the window opened and nothing
+       was logged as an error
+     - the gibberish smoke model sometimes emitted a genre tag
+       mid-text, which is why generation now stops at any tag
 8. **Docs + README** — `docs/09-gpu.md` (devices, mixed precision, fused
    attention, gradient accumulation) and `docs/10-mixtape.md` (data
    mixtures, control tokens, collisions, plus the KV cache). Add a Stage 4
@@ -581,27 +647,44 @@ move items from "Coming" to "Ready" when they're built and tested.
     trains a toy model on it.
   - To change the mixture, edit `TRAIN_TOKENS` in the script, delete
     `train.bin`, and re-run `mix`.
+  - **Disk and time (measured on the dev machine):** raw downloads
+    35 GB, the dataset folder 22 GB, so have ~60 GB free. Downloads take
+    ~30 min at ~20 MB/s; after that, format ~20 min, tokenizer
+    seconds, encode ~3 min, mix ~3.5 min. After training, `formatted/`
+    and `mixtape-raw/` can be deleted to get ~45 GB back. Keep
+    `tokens/` if you might re-mix.
 - **RecipeNLG manual download:** from
   https://recipenlg.cs.put.poznan.pl/, accept the terms, download
   `dataset.zip`, and put it (or the `full_dataset.csv` inside) in
   `~/tlm-data/mixtape-raw/recipenlg/`. Until then, the other genres
-  download and format, and the tokenizer stage waits for it.
+  download and format, and the tokenizer stage waits for it. **If the site
+  fails** (it returned "Internal Server Error" on 2026-10-16), use the
+  exact copy on Hugging Face, which is what the dev machine used:
+  `SandhyaKilari/RecipeNLG_dataset` → `RecipeNLG_dataset.csv` (2.29 GB,
+  the same 2,231,142 recipes and columns). It's unofficial, so
+  RecipeNLG's terms still apply. The script's help text gives the URL.
+- **Desktop app:**
+  - `python tools\make_shortcut.py` (run with the venv's python) puts a
+    "TLM Mixtape" shortcut on the desktop. It asks Windows where the
+    desktop is, which matters when OneDrive has moved it. Re-run it if
+    the repo or the venv moves.
+  - Or start it with `python -m tlm.gui` (`--run NAME`,
+    `--device cpu|cuda`).
+  - Tkinter comes with the python.org Windows installer (the "tcl/tk
+    and IDLE" option, on by default); there's nothing to pip install.
+  - It loads the first of `mixtape`, `mixtape-pilot`, `mixtape-smoke`
+    that has a `best.pt`; Reload picks up a newer one mid-training. It
+    runs on the GPU if ≥ 1.5 GB is free, otherwise the CPU.
+  - Saved favorites go to `favorites.md` in the repo (a laugh log worth
+    committing). The deck state goes to `~/tlm-data/gui_state.json` and
+    errors to `~/tlm-data/gui.log`.
+  - The ideas are in `tlm/ideas.json`. Users can add their own, and the
+    app picks them up on its next launch.
+  - `python tools\make_icon.py` redraws `assets/mixtape.ico`.
 
 ### Coming (document when built)
 
-- Mixtape disk space and run times. Measured so far, without RecipeNLG:
-  raw downloads 33 GB (~30 min), formatted text 9.6 GB (~17 min). Still
-  to measure: the RecipeNLG zip, the tokenizer, encode and mix times,
-  and the size of tokens/ and train.bin. Free disk should be ~60 GB
-  before starting.
 - Mixtape quickstart: pilot + train commands, ~4.2 days on the RTX 3050,
   peak memory, and the micro-batch the pilot settled on (steps 5–6).
-- Desktop app (step 7):
-  - `python tools\make_shortcut.py` creates the desktop shortcut and
-    finds a OneDrive-redirected Desktop by itself; re-run it if the repo
-    moves
-  - Tkinter ships with the python.org Windows installer (the "tcl/tk and
-    IDLE" option, on by default)
-  - where favorites and the app's log are written
 - README table: a Stage 4 column, a device row (CPU vs GPU timings), and
   the new references (step 8).

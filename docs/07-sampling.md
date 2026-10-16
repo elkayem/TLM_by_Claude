@@ -85,6 +85,10 @@ side of LLMs. Natural next steps, roughly in order of effort:
 
 1. **KV-caching** — make `generate()` not re-compute the past every token
    (chapter 5 sketched why; implementing it is a satisfying exercise).
+   Stage 4 added one: `TLM.generate_stream()` keeps each layer's keys and
+   values, and yields tokens one at a time for the desktop app. Try it
+   yourself first, then compare. With the same seed it produces exactly
+   `generate()`'s tokens.
 2. **An attention visualizer** — dump `att` matrices during generation and
    heatmap them (chapter 3's experiment, applied to generation).
 3. **Fine-tuning** — take your trained stories model and continue training

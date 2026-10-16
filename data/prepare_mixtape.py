@@ -127,6 +127,10 @@ terms of use first):
   2. accept the terms and download the dataset (dataset.zip, ~2 GB)
   3. put the zip (or the full_dataset.csv inside it) in
        {RECIPE_DIR}
+If the site's download fails (in October 2026 it returned "Internal Server
+Error"), an exact copy of full_dataset.csv - same 2,231,142 recipes, same
+columns - is on Hugging Face (unofficial; RecipeNLG's terms still apply):
+  {HF}SandhyaKilari/RecipeNLG_dataset/resolve/main/RecipeNLG_dataset.csv
 Then re-run this script; the other genres don't wait for it until the
 tokenizer stage, which needs all five.
 """
