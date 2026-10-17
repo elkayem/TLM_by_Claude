@@ -360,6 +360,43 @@ Directions:
      including the desktop, 69 W, 55 °C.
    - **While it trains,** the desktop app falls back to the CPU (the GPU
      has < 1.5 GB free) and Reload picks up the newest `mixtape/best.pt`.
+   - **Progress at 08:30 (step 1,500):** ~9,800 tok/s, faster than the
+     pilot because the full run evaluates less often. Projected finish
+     **2026-10-19 ~05:45**, 2.95 days in total.
+   - **GPU health:** 68 °C (NVIDIA's limits for this card: target 83,
+     max operating 92, slowdown 94, shutdown 97), fan 72%, held at the
+     70 W power cap, no heat or hardware slowdown flags.
+   - **Monitoring:**
+     - `tools\gpu_health.cmd`/`.ps1` logs every 5 min to
+       `~/tlm-data/gpu-health.csv` (temperature, fan, power, clock,
+       utilization, memory, slowdown flags, training step). It prints a
+       red warning at ≥ 83 °C, on a slowdown flag, or after 15 idle
+       minutes, and stops itself when the training log says "done.". It
+       was started through Explorer, like the run.
+     - A Claude scheduled task, `tlm-mixtape-checkin`, runs at
+       00:17 / 06:17 / 12:17 / 18:17 on Oct 16–19. It checks progress,
+       losses, GPU health and disk space, appends to
+       `~/tlm-data/mixtape-checkins.md`, and push-notifies only on a
+       problem or at the finish. It runs only while the Claude app is
+       open; a check missed while the app is closed runs at the next
+       launch. Delete it after the run (cron has no year: it would wake
+       again in October 2027, though it's told to just say so).
+     - The task runs ONE fixed command, `tools\mixtape_status.ps1`, a
+       read-only health check. Its first line is `STATUS: OK`,
+       `PROBLEM - ...` or `FINISHED - ...`, and it appends its report to
+       `~/tlm-data/mixtape-checkins.md`. It replaced a first version
+       whose many multi-part PowerShell commands could only be approved
+       "once" per run, so every scheduled run would have stopped to ask.
+     - **Unattended:** the project's `.claude/settings.local.json` (not
+       committed; covered by the global git ignore) allows exactly
+       `PowerShell(& "C:\...\tools\mixtape_status.ps1")`, nothing
+       broader. A first version of the rule, for
+       `powershell -NoProfile -ExecutionPolicy Bypass -File ...`, still
+       stopped for approval: launching a nested PowerShell with a policy
+       bypass seems to need a prompt regardless. The PowerShell tool
+       already runs with execution policy Bypass, so the direct `&` call
+       works. Tested 2026-10-16 09:02: the scheduled run finished in 17 s
+       with no prompt. Remove the rule along with the task after the run.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
@@ -376,7 +413,9 @@ Directions:
    - **`tlm/gui.py`:**
      - the genre pulldown, a per-genre form, and 4 clickable ideas from
        a persistent shuffled deck; More ideas, Surprise me
-     - Creativity (temperature 0.5–1.2) and Length (150 / 300 / 600)
+     - Creativity and Length (150 / 300 / 600). Creativity is now a
+       pulldown, "mellow 0.6 / groovy 0.8 / far out 1.0 / cosmic 1.2",
+       which shows the temperature next to each name.
      - streaming output with Stop; generation also stops at
        `<|endoftext|>` or any genre tag
      - Show what the model sees; Save to favorites; Copy
@@ -388,6 +427,40 @@ Directions:
    - **`tools/make_icon.py`:** draws the cassette into
      `assets/mixtape.ico` (+ a `.png` preview) using the standard
      library only.
+   - **70s redesign (2026-10-16, after Larry asked for more pizazz):**
+     - the palette: chocolate brown, rust, burnt orange, mustard,
+       avocado and cream
+     - fonts: Cooper Black for titles and buttons, Bookman Old Style for
+       labels, Courier New for the output text (each with fallbacks)
+     - sunset stripes under the header
+     - the ideas on a mustard-edged "J-card"
+     - a header cassette, drawn on a canvas, whose reels spin and whose
+       tape winds left to right as text arrives, plus a blinking REC
+       light
+     - the cassette label is handwritten (Ink Free) with the genre and
+       track number, shrinking to fit. Full idea titles were too long
+       for the label; the title still heads the output.
+     - real cassette proportions (100.4 × 63.8 mm, hubs 42% of the
+       width apart, a little above the middle), after Larry spotted the
+       first draft's reels sitting too low and too close together
+     - the tape is no longer drawn across the window between the packs
+       (Larry's catch: a real tape never runs there), nor along the
+       bottom edge
+     - the layout redone from Larry's photo of a real cassette, every
+       position measured from the photo's pixels:
+       - a label with clipped top corners and the photo's stripes
+         (golden, orange, teal, golden, rust) running behind the window
+       - black plastic inside the label's cutout, so the tape packs show
+         only through the small clear pane in the middle (Larry's catch);
+         a pack too small to reach the pane is hidden
+       - hubs seen through round holes: a grey rim, a white face and six
+         short teeth around its inside
+       - a lower trapezoid widening down to the bottom edge (Larry caught
+         it upside down), with a centre screw, two round holes and two
+         square holes
+       - four corner screws, and the small tab on each side of the shell
+         (Larry's catch)
+     - the icon redrawn from the same geometry
    - **`tools/make_shortcut.py`:** creates the shortcut through
      PowerShell's WScript.Shell COM object. Created on this PC:
      `C:\Users\lkmcg\OneDrive\Desktop\TLM Mixtape.lnk` → the

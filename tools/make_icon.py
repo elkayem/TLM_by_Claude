@@ -13,6 +13,7 @@ Windows can pick the sharpest one for the desktop, taskbar or title bar:
 Run from the tlm/ project root:  python tools\\make_icon.py
 """
 
+import math
 import os
 import struct
 import zlib
@@ -21,15 +22,20 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(REPO, "assets", "mixtape.ico")
 SIZES = (16, 32, 48, 256)
 
-# colours (R, G, B)
-BODY = (46, 52, 64)        # dark slate shell
-EDGE = (30, 34, 42)
-LABEL = (246, 193, 119)    # warm orange label
-STRIPE = (235, 111, 146)   # pink stripe across the label
-WINDOW = (36, 40, 50)      # the clear window, dark
-TAPE = (120, 82, 60)       # brown tape wound on the reels
-REEL = (236, 239, 244)     # white reel hubs
-SCREW = (110, 118, 135)
+# colours (R, G, B) - the same 1970s palette as the app (tlm/gui.py)
+BODY = (43, 38, 34)        # charcoal shell
+EDGE = (38, 33, 32)        # the lower trapezoid
+LABEL = (246, 231, 200)    # cream label, with stripes (v from, v to, colour)
+BANDS = ((.319, .365, (242, 179, 61)), (.369, .478, (224, 123, 38)),
+         (.55, .599, (47, 138, 134)), (.614, .662, (242, 179, 61)),
+         (.678, .727, (184, 70, 27)))
+WINDOW = (28, 24, 21)      # the clear pane, dark behind the tape
+TAPE = (90, 56, 36)        # tape packs, seen through the pane
+HUB = (241, 237, 230)      # the hubs: white face, grey rim and teeth
+RIM = (201, 194, 182)
+TOOTH = (168, 161, 150)
+HOLE = (14, 12, 11)
+SCREW = (94, 86, 80)
 
 
 def in_round_rect(x, y, x0, y0, x1, y1, r):
@@ -44,27 +50,64 @@ def in_circle(x, y, cx, cy, r):
     return (x - cx) ** 2 + (y - cy) ** 2 <= r * r
 
 
+# The cassette is laid out in its own coordinates, u across and v down
+# (0..1 each), exactly like the app's header cassette (tlm/gui.py), which
+# was measured from a photo of a real one (100.4 x 63.8 mm).
+W = 0.92                                   # shell width in the icon square
+H = W * 63.8 / 100.4                       # ... and height
+X0, Y0 = 0.04, 0.5 - H / 2
+A = W / H                                  # u units -> shell heights
+# tape packs, wound 30% of the way from the left reel to the right one
+EMPTY, FULL = 0.095, 0.36
+PACKS = ((0.289, (EMPTY ** 2 + 0.7 * (FULL ** 2 - EMPTY ** 2)) ** 0.5),
+         (0.711, (EMPTY ** 2 + 0.3 * (FULL ** 2 - EMPTY ** 2)) ** 0.5))
+
+
 def shade(x, y):
     """Colour (with alpha) at a point of the unit square, top shape first."""
-    for cx in (0.335, 0.665):              # the two reels
-        if in_circle(x, y, cx, 0.505, 0.035):
-            return WINDOW + (255,)         # hub hole
-        if in_circle(x, y, cx, 0.505, 0.075):
-            return REEL + (255,)
-        if in_circle(x, y, cx, 0.505, 0.115):
-            return TAPE + (255,)
-    if in_round_rect(x, y, 0.25, 0.42, 0.75, 0.59, 0.07):
+    u, v = (x - X0) / W, (y - Y0) / H      # into cassette coordinates
+    for cu, _ in PACKS:     # the hubs, in round holes
+        du, dv = (u - cu) * A, v - 0.442
+        d = math.hypot(du, dv)
+        if d <= 0.104:
+            if d > 0.092:
+                return HOLE + (255,)
+            if d > 0.075:
+                return RIM + (255,)
+            a = math.atan2(dv, du) % (math.pi / 3)      # six teeth
+            if d > 0.054 and min(a, math.pi / 3 - a) * d < 0.009:
+                return TOOTH + (255,)
+            return HUB + (255,)
+    if 0.387 <= u <= 0.611 and 0.342 <= v <= 0.547:  # the clear pane: the
+        for cu, r in PACKS:                          # only place tape shows
+            if math.hypot((u - cu) * A, v - 0.442) <= r:
+                return TAPE + (255,)
         return WINDOW + (255,)
-    if in_round_rect(x, y, 0.15, 0.30, 0.85, 0.36, 0.0):
-        return STRIPE + (255,)
-    if in_round_rect(x, y, 0.15, 0.26, 0.85, 0.66, 0.05):
+    if 0.208 <= u <= 0.792 and 0.31 <= v <= 0.571:   # the label's cutout:
+        return BODY + (255,)                         # black plastic
+    clipped = ((u - 0.049) / 0.05 + (v - 0.083) / 0.077 < 1 or
+               (0.951 - u) / 0.05 + (v - 0.083) / 0.077 < 1)
+    if 0.049 <= u <= 0.951 and 0.083 <= v <= 0.727 and not clipped:
+        for v0, v1, colour in BANDS:
+            if v0 <= v < v1:
+                return colour + (255,)
         return LABEL + (255,)
-    for sx, sy in ((0.10, 0.25), (0.90, 0.25), (0.10, 0.74), (0.90, 0.74)):
-        if in_circle(x, y, sx, sy, 0.025):
+    for su, sv in ((.033, .044), (.967, .044), (.033, .956), (.967, .956),
+                   (.5, .831)):
+        if math.hypot((u - su) * A, v - sv) <= 0.022:
             return SCREW + (255,)
-    if 0.66 <= y <= 0.80 and abs(x - 0.5) <= 0.22 + (0.80 - y) * 0.5:
-        return EDGE + (255,)               # the trapezoid at the bottom
-    if in_round_rect(x, y, 0.04, 0.17, 0.96, 0.83, 0.07):
+    spread = (v - 0.766) / 0.234 * 0.03    # trapezoid widens downward
+    if 0.766 <= v <= 1.0 and 0.172 - spread <= u <= 0.828 + spread:
+        for hu in (0.25, 0.75):
+            if math.hypot((u - hu) * A, v - 0.934) <= 0.024:
+                return HOLE + (255,)
+        for hu in (0.356, 0.644):
+            if abs((u - hu) * A) <= 0.022 and abs(v - 0.911) <= 0.018:
+                return HOLE + (255,)
+        return EDGE + (255,)
+    if (in_round_rect(u * A, v, 0, 0, A, 1, 0.045) or      # the shell, and
+            in_round_rect(u * A, v, -0.013, 0.655, A + 0.013, 0.905,
+                          0.008)):                        # its side tabs
         return BODY + (255,)
     return (0, 0, 0, 0)                    # transparent
 

@@ -181,7 +181,16 @@ def save_checkpoint(path, model, optimizer, step, config, best_val, elapsed):
         "elapsed": elapsed,   # cumulative training seconds across all
                               # sessions, so --resume continues the clock
     }, tmp)
-    os.replace(tmp, path)
+    # On Windows, replacing a file fails while another program has it open
+    # (the Mixtape app loading best.pt, a backup tool, an antivirus scan).
+    # Wait and retry for up to a minute rather than crash a multi-day run.
+    for _ in range(60):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(1)
+    os.replace(tmp, path)   # still locked after a minute: let the error show
 
 
 def main():

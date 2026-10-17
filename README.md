@@ -183,6 +183,10 @@ re-run it if the repo or venv moves. Or start it with `python -m tlm.gui`
   has a `best.pt`; **Reload model** picks up a newer one mid-training. It
   uses the GPU if ≥ 1.5 GB is free, otherwise the CPU — so it can run
   alongside a training run.
+- It's dressed as a 1970s mixtape: while the model writes, the cassette's
+  reels turn, the tape winds from one reel to the other, and the REC light
+  blinks. **Creativity** is the sampling temperature, with 70s names:
+  mellow 0.6, groovy 0.8, far out 1.0, cosmic 1.2.
 - Each genre has a small form (a title; a product, star rating and
   category; a premise) that the app turns into the exact document header
   the model was trained on. Tick **Show what the model sees** to see it.
