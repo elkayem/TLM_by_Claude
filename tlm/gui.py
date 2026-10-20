@@ -58,7 +58,7 @@ from tkinter import messagebox
 
 import torch
 
-from .config import DATA_ROOT, TLMConfig, checkpoint_dir, data_dir
+from .config import DATA_ROOT, checkpoint_dir, config_from_checkpoint, data_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
 
@@ -415,7 +415,7 @@ def load_model(requested_run, requested_device, status=lambda s: None):
     wait_until_safe(run, status)
     status("Loading the model ...")
     ckpt = torch.load(path, weights_only=True, map_location="cpu")
-    config = TLMConfig(**ckpt["config"])
+    config = config_from_checkpoint(ckpt["config"])
     tok = load_tokenizer(os.path.join(data_dir(config.dataset),
                                       "tokenizer.json"))
     if "<|wiki|>" not in tok.vocab:

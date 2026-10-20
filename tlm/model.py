@@ -49,7 +49,7 @@ class CausalSelfAttention(nn.Module):
     from earlier positions into this one.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, layer=0):
         super().__init__()
         assert config.n_embd % config.n_head == 0, \
             "n_embd must divide evenly into n_head heads"
@@ -71,6 +71,26 @@ class CausalSelfAttention(nn.Module):
         self.dropout = config.dropout       # the fused kernel takes it raw
         self.fused = config.fused_attention
 
+        # QK-NORM (config.qk_norm: on for new models, off for the Stage 1-3
+        # presets, which predate it). Each head's query and key vectors are
+        # divided by their own root-mean-square, then scaled by learned
+        # per-channel gains.
+        # A score q.k / sqrt(hs) then can't exceed about gain_q * gain_k *
+        # sqrt(hs), so attention scores can't run away. Without it, the
+        # first mixtape run's layer 1 grew scores into the MILLIONS: every
+        # head locked onto one token, its gradients swamped the rest of the
+        # network, and training stalled and spiked (see docs/10-mixtape.md).
+        # The gains are 1-D, so AdamW leaves them undecayed like LayerNorm's.
+        # config.qk_norm_layers limits it to some layers (empty = all).
+        self.qk_norm = config.qk_norm and (not config.qk_norm_layers
+                                           or layer in config.qk_norm_layers)
+        if self.qk_norm:
+            self.q_gain = nn.Parameter(torch.ones(config.n_embd))
+            self.k_gain = nn.Parameter(torch.ones(config.n_embd))
+        # For monitoring: when `probe` is set, forward() also records the
+        # largest attention score it computed (train.py logs it at each eval).
+        self.probe, self.score_max = False, None
+
         # THE CAUSAL MASK. A lower-triangular matrix of ones:
         #   position 0 may see: [0]
         #   position 1 may see: [0, 1]
@@ -84,6 +104,15 @@ class CausalSelfAttention(nn.Module):
         self.register_buffer("causal_mask",
                              mask.view(1, 1, config.block_size,
                                        config.block_size))
+
+    def rms_norm(self, t, gain):
+        """(B, H, T, hs) -> same shape: each head's vector scaled to RMS 1,
+        then multiplied by that head's slice of `gain`. Done in fp32 even
+        under bf16 autocast - this is the precision-sensitive part."""
+        hs = t.size(-1)
+        tf = t.float()
+        tf = tf * torch.rsqrt(tf.pow(2).mean(-1, keepdim=True) + 1e-6)
+        return (tf * gain.view(self.n_head, 1, hs)).to(t.dtype)
 
     def forward(self, x, cache=None):
         B, T, C = x.shape
@@ -104,6 +133,8 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, hs).transpose(1, 2)  # (B, H, T, hs)
         k = k.view(B, T, self.n_head, hs).transpose(1, 2)  # (B, H, T, hs)
         v = v.view(B, T, self.n_head, hs).transpose(1, 2)  # (B, H, T, hs)
+        if self.qk_norm:
+            q, k = self.rms_norm(q, self.q_gain), self.rms_norm(k, self.k_gain)
 
         # KV CACHE (generation only - see TLM.generate_stream). A position's
         # key and value depend only on that position's own input, so once
@@ -121,6 +152,11 @@ class CausalSelfAttention(nn.Module):
         # newest token may look at everything - no mask needed.
         causal = k.size(2) == T
         assert causal or T == 1, "with a cache, feed one token at a time"
+        if self.probe:   # monitoring only: build the (B, H, T, T) scores once
+            s = (q @ k.transpose(-2, -1)).float() / math.sqrt(hs)
+            if causal:
+                s = s.masked_fill(self.causal_mask[:, :, :T, :T] == 0, 0.0)
+            self.score_max = s.abs().max().item()
 
         # ---- THE ATTENTION EQUATION:  softmax(q k^T / sqrt(hs)) v --------
         # Written out one step at a time in explicit_attention() below -
@@ -254,10 +290,10 @@ class Block(nn.Module):
     matter how the sums on the residual stream grow.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, layer=0):
         super().__init__()
         self.ln1 = nn.LayerNorm(config.n_embd)
-        self.attn = CausalSelfAttention(config)
+        self.attn = CausalSelfAttention(config, layer)
         self.ln2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
 
@@ -290,7 +326,7 @@ class TLM(nn.Module):
 
         self.drop = nn.Dropout(config.dropout)
         self.blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.n_layer)])
+            [Block(config, i) for i in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd)  # final norm (pre-norm twin)
 
         # The language-model head maps the final C-dim vector at each
@@ -377,6 +413,21 @@ class TLM(nn.Module):
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)),
                                    targets.reshape(-1))
         return logits, loss
+
+    @torch.no_grad()
+    def attention_score_max(self, idx):
+        """The largest attention score (q.k / sqrt(hs), in absolute value)
+        each layer computes on `idx` - a health check. Healthy layers stay in
+        the tens to low hundreds; a layer heading for the millions has heads
+        locking onto single tokens (the failure QK-norm prevents)."""
+        for block in self.blocks:
+            block.attn.probe = True
+        try:
+            self(idx)
+            return [block.attn.score_max for block in self.blocks]
+        finally:
+            for block in self.blocks:
+                block.attn.probe = False
 
     @torch.no_grad()
     def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None,

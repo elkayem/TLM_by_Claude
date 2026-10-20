@@ -22,7 +22,7 @@ $evalCsv = Join-Path $ckpt "mixtape\log.csv"
 $trainLog = Join-Path $data "mixtape-train.log"
 $healthCsv = Join-Path $data "gpu-health.csv"
 $report = Join-Path $data "mixtape-checkins.md"
-$maxSteps, $tokensPerStep = 76000, 32768
+$maxSteps, $tokensPerStep = 117000, 32768   # 76,000, then 79,000, until the extension
 $now = Get-Date
 $problems = New-Object System.Collections.Generic.List[string]
 $lines = New-Object System.Collections.Generic.List[string]
@@ -30,7 +30,12 @@ $lines = New-Object System.Collections.Generic.List[string]
 # --- finished?
 $done = $null
 if (Test-Path $trainLog) {
+    # Only the current launch counts: an extended run's log already holds
+    # an earlier "done." line.
+    $launch = Select-String -LiteralPath $trainLog -Pattern "python -u -m tlm\.train" |
+        Select-Object -Last 1
     $done = Select-String -LiteralPath $trainLog -Pattern "^done\. best val loss" |
+        Where-Object { $launch -and $_.LineNumber -gt $launch.LineNumber } |
         Select-Object -Last 1
 }
 
@@ -49,18 +54,38 @@ if ($rows.Count -lt 2) {
 } else {
     $last = $rows[-1]
     $step = [int]$last.step
-    $vals = $rows | ForEach-Object { [double]$_.val_loss }
+    # Judge by the AVERAGE of the five genre losses: the mixed val_loss
+    # swings +/-0.2 with whichever genres its few sequences happen to draw.
+    $genres = "book", "recipe", "review", "story", "wiki"
+    $vals = $rows | ForEach-Object {
+        $r = $_; ($genres | ForEach-Object { [double]$r."val_$_" } |
+            Measure-Object -Average).Average }
+    $mean = $vals[-1]
     $best = ($vals | Measure-Object -Minimum).Minimum
     $age = ($now - (Get-Item -LiteralPath $evalCsv).LastWriteTime).TotalMinutes
+    # The MEDIAN of the last 4 evals: the first eval after a (re)start
+    # includes startup time and would drag an average down.
     $recent = @($rows | Select-Object -Last 4 | Where-Object { [int]$_.step -gt 0 } |
-        ForEach-Object { [double]$_.tok_per_sec })
-    $tps = ($recent | Measure-Object -Average).Average
+        ForEach-Object { [double]$_.tok_per_sec } | Sort-Object)
+    $mid = [int][math]::Floor($recent.Count / 2)
+    $tps = if ($recent.Count % 2) { $recent[$mid] } else { ($recent[$mid - 1] + $recent[$mid]) / 2 }
     $lines.Add(("- Step {0:N0} of {1:N0} ({2:N1}%), eval log written {3:N0} min ago" -f
                 $step, $maxSteps, (100 * $step / $maxSteps), $age))
-    $lines.Add(("- Val loss {0} (best {1:N4}): book {2} | recipe {3} | review {4} | story {5} | wiki {6}" -f
-                $last.val_loss, $best, $last.val_book, $last.val_recipe,
+    $lines.Add(("- Training-log score (fresh random passages each eval, +/-0.03 luck): genre average {0:N4} (best {1:N4}): book {2} | recipe {3} | review {4} | story {5} | wiki {6}" -f
+                $mean, $best, $last.val_book, $last.val_recipe,
                 $last.val_review, $last.val_story, $last.val_wiki))
-    $lines.Add(("- Throughput {0:N0} tok/s (average of the last evals)" -f $tps))
+    # Health columns, logged since the QK-norm restart (2026-10-18)
+    if ($last.PSObject.Properties.Name -contains "attn_score_max" -and $last.attn_score_max) {
+        $lines.Add(("- Health: grad norm {0} (max {1}), largest attention score {2}" -f
+                    $last.grad_norm, $last.grad_norm_max, $last.attn_score_max))
+        if ([double]$last.attn_score_max -gt 1000) {
+            $problems.Add("largest attention score $($last.attn_score_max) - runaway attention again?")
+        }
+        if ([double]$last.grad_norm -gt 8) {
+            $problems.Add("gradient norm $($last.grad_norm) (healthy is about 1-2)")
+        }
+    }
+    $lines.Add(("- Throughput {0:N0} tok/s (median of the last 4 evals)" -f $tps))
     if (-not $done) {
         if ($age -gt 60) { $problems.Add(("no new eval in {0:N0} min (expected every ~28)" -f $age)) }
         if ($tps -lt 8000) { $problems.Add(("throughput low: {0:N0} tok/s (normal ~9,700)" -f $tps)) }
@@ -68,8 +93,36 @@ if ($rows.Count -lt 2) {
         $lines.Add("- Projected finish: $($eta.ToString('ddd yyyy-MM-dd HH:mm'))")
     }
     if ($vals | Where-Object { [double]::IsNaN($_) }) { $problems.Add("NaN in the val loss") }
-    if ([double]$last.val_loss -gt $best + 0.3) {
-        $problems.Add(("val loss {0} is more than 0.3 above its best {1:N4}" -f $last.val_loss, $best))
+    if ($mean -gt $best + 0.15) {
+        $problems.Add(("genre-average val loss {0:N4} is more than 0.15 above its best {1:N4}" -f $mean, $best))
+    }
+}
+
+# --- fixed-passage scores (tools\track_fixed_eval.py): every checkpoint
+# scored on the SAME 60 val passages, so a change is the model, not luck
+$fixedCsv = Join-Path $ckpt "mixtape\fixed-eval.csv"
+if (Test-Path $fixedCsv) {
+    $trend = @(Import-Csv -LiteralPath $fixedCsv | Where-Object {
+        $_.note -notlike "first run*" -and $_.note -notlike "trial start*" })
+    if ($trend.Count) {
+        $lastF = $trend[-1]
+        $bestF = ($trend | ForEach-Object { [double]$_.mean } | Measure-Object -Minimum).Minimum
+        $steps = ($trend | Select-Object -Last 6 | ForEach-Object {
+            "{0:N0}: {1}" -f [int]$_.step, $_.mean }) -join " -> "
+        $lines.Add(("- Fixed-passage score (same 60 passages every checkpoint): {0} at step {1:N0} (best {2:N4})" -f
+                    $lastF.mean, [int]$lastF.step, $bestF))
+        $lines.Add("  - trend: $steps")
+        if ([double]$lastF.mean -gt $bestF + 0.05) {
+            $problems.Add(("fixed-passage score {0} is more than 0.05 above its best {1:N4}" -f $lastF.mean, $bestF))
+        }
+        if ($rows.Count -and -not $done -and ([int]$rows[-1].step - [int]$lastF.step) -gt 2500) {
+            $problems.Add("fixed-passage scores are behind (last scored step $($lastF.step))")
+        }
+    }
+    $tracker = Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+        Where-Object { $_.CommandLine -like "*track_fixed_eval*" }
+    if (-not $tracker -and -not $done) {
+        $problems.Add("fixed-passage tracker not running (double-click tools\track_fixed_eval.cmd)")
     }
 }
 

@@ -21,6 +21,7 @@ $log = Join-Path $data "mixtape-train.log"
 
 $trainArgs = @("-u", "-m", "tlm.train", "--config", "mixtape")
 if (Test-Path (Join-Path $ckpt "mixtape\latest.pt")) { $trainArgs += "--resume" }
+$trainArgs += $args          # extra options, e.g. train_mixtape.cmd --rewarm 500
 
 "=== $(Get-Date -Format s)  python $($trainArgs -join ' ')" |
     Add-Content -LiteralPath $log -Encoding UTF8

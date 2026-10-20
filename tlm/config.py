@@ -93,6 +93,18 @@ class TLMConfig:
                               # (same math, far less memory on a GPU).
                               # False = the explicit step-by-step version in
                               # model.py, slower but identical in result.
+    qk_norm: bool = True      # QK-NORM: normalize each head's query and key
+                              # vectors before their dot product, so attention
+                              # scores can't grow without bound. Stage 4's
+                              # first run died of exactly that (see
+                              # CausalSelfAttention in model.py). On for new
+                              # models; the Stage 1-3 presets and every
+                              # checkpoint saved before it existed are off.
+    qk_norm_layers: tuple = ()    # ... only in these layers (empty = all).
+                                  # For grafting QK-norm onto a model trained
+                                  # without it: normalizing a trained layer
+                                  # changes what it does, so touch only the
+                                  # layers that need it.
 
     # ------------------------------------------------------------- training
     batch_size: int = 32      # sequences per forward/backward pass
@@ -110,6 +122,13 @@ class TLMConfig:
     weight_decay: float = 0.1     # AdamW L2-style penalty on weights
     grad_clip: float = 1.0        # cap on gradient norm (prevents rare huge
                                   # gradients from wrecking the weights)
+    # EXTENDING a finished run ("rewarm and re-anneal"): from restart_step
+    # on, the LR climbs from min_lr back up to restart_lr over
+    # restart_warmup steps, then glides down to min_lr again at max_steps.
+    # The first schedule keeps ending at restart_step. 0 = no restart.
+    restart_step: int = 0
+    restart_lr: float = 0.0
+    restart_warmup: int = 1000
 
     # ------------------------------------------------------------- logging
     eval_interval: int = 250  # measure val loss every N steps
@@ -119,6 +138,10 @@ class TLMConfig:
     sample_prompts: tuple = ("\n",)  # what each sample starts from; with
                                   # several, successive samples take turns
     checkpoint_interval: int = 1000  # save model to disk every N steps
+    snapshot_interval: int = 0    # also keep a full copy every N steps in
+                                  # snapshots/ (0 = off), so a long run always
+                                  # has something to roll back to
+    snapshots_kept: int = 3       # ... keeping only the newest few
 
     # ---------------------------------------------------------------- paths
     dataset: str = "shakespeare"  # dataset folder (see data_dir() above)
@@ -126,6 +149,16 @@ class TLMConfig:
 
     def to_dict(self):
         return asdict(self)
+
+
+def config_from_checkpoint(saved):
+    """The TLMConfig a checkpoint was trained with, from the dict saved in it.
+
+    A field added since the checkpoint was saved takes its default - except
+    qk_norm: checkpoints that don't mention it predate QK-norm and were
+    trained without it, so it has to stay off for them to load.
+    """
+    return TLMConfig(**{"qk_norm": False, **saved})
 
 
 # Training samples for the mixtape presets take turns through these, so the
@@ -149,8 +182,12 @@ MIXTAPE_PROMPTS = (
 # ---------------------------------------------------------------------------
 
 PRESETS = {
+    # The Stage 1-3 presets predate QK-norm: qk_norm=False keeps them exactly
+    # as trained and documented (and their checkpoints loadable).
+
     # Sanity check only: verifies data -> model -> loss -> checkpoint works.
     "smoke": TLMConfig(
+        qk_norm=False,
         block_size=64, n_layer=2, n_head=2, n_embd=64,
         batch_size=8, max_steps=50, warmup_steps=10,
         eval_interval=25, eval_iters=5, sample_interval=50,
@@ -162,6 +199,7 @@ PRESETS = {
     # The dataset is tiny (~1MB) so we keep the model small and the dropout
     # meaningful: with this little data, a big model would just memorize.
     "shakespeare": TLMConfig(
+        qk_norm=False,
         block_size=256, n_layer=6, n_head=6, n_embd=192,
         batch_size=32, max_steps=5000, warmup_steps=200,
         eval_interval=250, eval_iters=50, sample_interval=500,
@@ -174,6 +212,7 @@ PRESETS = {
     # At batch 32 x block 256 = 8,192 tokens per step, 60k steps sees about
     # 500M tokens: roughly one pass over the dataset.
     "stories": TLMConfig(
+        qk_norm=False,
         block_size=256, n_layer=8, n_head=8, n_embd=256,
         batch_size=32, max_steps=60000, warmup_steps=1000,
         eval_interval=500, eval_iters=50, sample_interval=1000,
@@ -192,6 +231,7 @@ PRESETS = {
     # already-good model toward a new format; big steps would wreck what
     # it knows ("catastrophic forgetting").
     "instruct-ft": TLMConfig(
+        qk_norm=False,
         block_size=256, n_layer=8, n_head=8, n_embd=256,
         batch_size=32, max_steps=4000, warmup_steps=100,
         learning_rate=3e-5, min_lr=3e-6,
@@ -204,6 +244,7 @@ PRESETS = {
     # to measure the true seconds/step before committing a week. If it
     # comes in slower than ~15 s/step, shrink n_embd to 448 in `instruct`.
     "instruct-pilot": TLMConfig(
+        qk_norm=False,
         block_size=512, n_layer=8, n_head=8, n_embd=512,
         batch_size=16, max_steps=1000, warmup_steps=100,
         eval_interval=100, eval_iters=20, sample_interval=500,
@@ -220,6 +261,7 @@ PRESETS = {
     # Chinchilla-optimal budget for this size; the pilot measured
     # 1,220 tok/s on the dev machine, making this ~5 days wall-clock.
     "instruct": TLMConfig(
+        qk_norm=False,
         block_size=512, n_layer=8, n_head=8, n_embd=512,
         batch_size=16, max_steps=65000, warmup_steps=1000,
         eval_interval=500, eval_iters=50, sample_interval=1000,
@@ -237,12 +279,27 @@ PRESETS = {
     # (grad_accum): the full 32k-token batch would never fit in the RTX
     # 3050's 6 GB at once. No dropout: every source is seen about once,
     # so there's nothing to memorize.
+    # QK-norm (layer 1 only) and snapshots were added at step 51,000
+    # (2026-10-18), after the first run's layer 1 attention scores ran away
+    # and training stalled and spiked; the run continued from that step's
+    # checkpoint with QK-norm grafted onto layer 1 (tools/add_qk_norm.py).
+    # A run started from scratch would use QK-norm in every layer.
+    # max_steps went from 76,000 to 79,000 at step 68,000 (2026-10-19), so
+    # the run ends when Larry gets home instead of idling for 3 hours. The
+    # cosine just stretches: the LR at step 68,001 is 8.7e-5 instead of
+    # 7.5e-5, and it still glides to min_lr at the (new) last step.
+    # EXTENDED after it finished (2026-10-19): 38,000 more steps (+50%,
+    # a second pass over the data) to 117,000, rewarming to 2e-4 over
+    # 1,000 steps and re-annealing to min_lr. The step-79,000 model is
+    # kept as the baseline the extension has to beat.
     "mixtape": TLMConfig(
         block_size=1024, n_layer=16, n_head=12, n_embd=768, dropout=0.0,
-        batch_size=2, grad_accum=16, max_steps=76000, warmup_steps=2000,
+        qk_norm=True, qk_norm_layers=(1,),
+        batch_size=2, grad_accum=16, max_steps=117000, warmup_steps=2000,
+        restart_step=79000, restart_lr=2e-4, restart_warmup=1000,
         learning_rate=6e-4, min_lr=6e-5,
         eval_interval=500, eval_iters=20, sample_interval=1000,
-        checkpoint_interval=1000,
+        checkpoint_interval=1000, snapshot_interval=5000,
         sample_prompts=MIXTAPE_PROMPTS,
         dataset="mixtape", run_name="mixtape",
     ),

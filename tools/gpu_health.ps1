@@ -61,8 +61,11 @@ while ($true) {
         if ($idle -ge 3) { $warn += "GPU nearly idle for 15+ min - is training still running?" }
         if ($warn) { Write-Host "$time  WARNING: $($warn -join '; ')" -ForegroundColor Red }
     }
-    if ((Test-Path $trainLog) -and
-            (Select-String -LiteralPath $trainLog -Pattern "^done\. best val loss" -Quiet)) {
+    # Only the current launch counts: an extended run's log already holds
+    # an earlier "done." line.
+    $txt = if (Test-Path $trainLog) { Get-Content -LiteralPath $trainLog -Raw } else { "" }
+    $launch = $txt.LastIndexOf("python -u -m tlm.train")
+    if ($launch -ge 0 -and $txt.IndexOf("done. best val loss", $launch) -ge 0) {
         Write-Host "The mixtape training log says done. Logger stopping." -ForegroundColor Green
         break
     }

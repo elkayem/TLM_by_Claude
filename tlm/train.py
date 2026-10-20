@@ -118,12 +118,26 @@ def get_lr(step, config):
     - Cosine decay: LR then glides smoothly down to min_lr. Big steps
       early (cover ground fast), small steps late (settle into a minimum
       instead of bouncing around it).
+    - Extending a finished run (config.restart_step): a second, smaller
+      warmup and cosine - "rewarm and re-anneal". With the LR already at
+      its floor, more steps would barely move the model; a moderate
+      rewarm lets it keep learning, and the new decay settles it again.
     """
+    if config.restart_step and step >= config.restart_step:
+        s = step - config.restart_step
+        if s < config.restart_warmup:
+            return config.min_lr + (config.restart_lr - config.min_lr) * (
+                (s + 1) / config.restart_warmup)
+        t = (s - config.restart_warmup) / max(
+            1, config.max_steps - config.restart_step - config.restart_warmup)
+        coeff = 0.5 * (1.0 + math.cos(math.pi * min(t, 1.0)))
+        return config.min_lr + coeff * (config.restart_lr - config.min_lr)
     if step < config.warmup_steps:
         return config.learning_rate * (step + 1) / config.warmup_steps
-    # progress through the decay phase, 0 -> 1
-    t = (step - config.warmup_steps) / max(
-        1, config.max_steps - config.warmup_steps)
+    # progress through the decay phase, 0 -> 1 (ending at restart_step if
+    # the run was later extended, so the first schedule stays as it was)
+    end = config.restart_step or config.max_steps
+    t = (step - config.warmup_steps) / max(1, end - config.warmup_steps)
     # cosine shape: coeff goes 1 -> 0 smoothly as t goes 0 -> 1
     coeff = 0.5 * (1.0 + math.cos(math.pi * min(t, 1.0)))
     return config.min_lr + coeff * (config.learning_rate - config.min_lr)
@@ -211,6 +225,13 @@ def main():
     parser.add_argument("--patience", type=int, default=None, metavar="N",
                         help="stop if val loss sets no new best for N "
                              "consecutive evals (default: run to the end)")
+    # After surgery on a checkpoint (tools/add_qk_norm.py) with a fresh
+    # optimizer, ramp the learning rate up again over N steps, as at the
+    # start of training: a fresh AdamW's first steps are erratic, and
+    # full-size ones could undo the repair.
+    parser.add_argument("--rewarm", type=int, default=0, metavar="N",
+                        help="on resume, ramp the LR up from ~0 over the "
+                             "first N steps of this session")
     parser.add_argument("--device", default="auto",
                         choices=["auto", "cuda", "cpu"],
                         help="where to train (default: the GPU if there "
@@ -328,11 +349,16 @@ def main():
             f"checkpoint already exists at {ckpt_path}; "
             f"pass --resume to continue it, or delete the folder to restart")
 
-    if start_step == 0:
+    # A fresh run starts a fresh log; a resumed run appends to its own (and
+    # starts one if it has none - e.g. a run seeded with another run's
+    # checkpoint).
+    if start_step == 0 or not os.path.exists(log_path):
         with open(log_path, "w", newline="") as f:
             csv.writer(f).writerow(
                 ["step", "lr", "train_loss", "val_loss", "tok_per_sec"]
-                + [f"val_{g}" for g in genre_vals])
+                + [f"val_{g}" for g in genre_vals]
+                + (["val_genre_mean"] if genre_vals else [])
+                + ["grad_norm", "grad_norm_max", "attn_score_max"])
 
     # ---- the loop
     model.train()
@@ -342,9 +368,12 @@ def main():
     t0, tokens_since = time.time(), 0
     session_start = time.time()
     evals_since_best = 0  # for --patience
+    gn_sum, gn_max, gn_n = 0.0, 0.0, 0   # gradient norms since the last eval
     for step in range(start_step, config.max_steps):
         # set this step's learning rate on every param group
         lr = get_lr(step, config)
+        if step - start_step < args.rewarm:
+            lr *= (step - start_step + 1) / args.rewarm
         for group in optimizer.param_groups:
             group["lr"] = lr
 
@@ -368,7 +397,12 @@ def main():
         # grad_clip, rescale it to that length. Direction is kept; only
         # the size of the step is capped. Insurance against the occasional
         # weird batch producing a weight-wrecking gradient spike.
-        torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
+        # It returns the norm from BEFORE clipping, which we log: a gradient
+        # norm that keeps climbing is an early warning (in Stage 4's first
+        # run it went from ~1.4 to ~6 before the loss spiked).
+        gn = torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                            config.grad_clip).item()
+        gn_sum, gn_max, gn_n = gn_sum + gn, max(gn_max, gn), gn_n + 1
         # (4) apply the update
         optimizer.step()
 
@@ -387,18 +421,39 @@ def main():
             print(f"step {step:6d} | lr {lr:.2e} | "
                   f"train {losses['train']:.4f} | val {losses['val']:.4f} | "
                   f"{tps:,.0f} tok/s | elapsed {fmt_hms(elapsed)}{mem}")
+            # The number that picks best.pt. With per-genre val sets it's
+            # their AVERAGE: the mixed val estimate draws only a few dozen
+            # sequences, a different genre blend each time (recipes score
+            # ~1.5, old novels ~3.4), so it swings by +/-0.2 on luck alone.
+            score = (sum(losses["val_" + g] for g in genre_vals)
+                     / len(genre_vals) if genre_vals else losses["val"])
             if genre_vals:
                 print("             val by genre: " + " | ".join(
-                    f"{g} {losses['val_' + g]:.4f}" for g in genre_vals))
+                    f"{g} {losses['val_' + g]:.4f}" for g in genre_vals)
+                    + f" | mean {score:.4f}")
+            # Health check: gradient norms since the last eval, and the
+            # largest attention score on one val batch (see QK-norm in
+            # model.py for why that one matters).
+            model.eval()
+            xb, _ = get_batch(splits["val"], config, generator, device)
+            with autocast:
+                attn_max = max(model.attention_score_max(xb))
+            model.train()
+            gn_mean = gn_sum / max(gn_n, 1)
+            print(f"             health: grad norm {gn_mean:.2f} "
+                  f"(max {gn_max:.2f}) | attention score max {attn_max:,.1f}")
             with open(log_path, "a", newline="") as f:
                 csv.writer(f).writerow(
                     [step, f"{lr:.2e}", f"{losses['train']:.4f}",
                      f"{losses['val']:.4f}", f"{tps:.0f}"]
-                    + [f"{losses['val_' + g]:.4f}" for g in genre_vals])
+                    + [f"{losses['val_' + g]:.4f}" for g in genre_vals]
+                    + ([f"{score:.4f}"] if genre_vals else [])
+                    + [f"{gn_mean:.3f}", f"{gn_max:.3f}", f"{attn_max:.1f}"])
             t0, tokens_since = time.time(), 0
-            # keep a separate copy of the best-ever model by val loss
-            if losses["val"] < best_val:
-                best_val = losses["val"]
+            gn_sum, gn_max, gn_n = 0.0, 0.0, 0
+            # keep a separate copy of the best-ever model by that score
+            if score < best_val:
+                best_val = score
                 evals_since_best = 0
                 save_checkpoint(best_path, model, optimizer, step, config,
                                 best_val, elapsed)
@@ -434,6 +489,22 @@ def main():
             elapsed = elapsed_before + (time.time() - session_start)
             save_checkpoint(ckpt_path, model, optimizer, step, config,
                             best_val, elapsed)
+
+        # SNAPSHOTS: latest.pt is overwritten every checkpoint_interval, so
+        # by the time a problem shows in the log, the last good state may be
+        # gone (Stage 4's first run had nothing between step 27,000 and the
+        # spike). Keep a few older full copies to roll back to.
+        if (config.snapshot_interval and step > 0
+                and step % config.snapshot_interval == 0):
+            snap_dir = os.path.join(ckpt_dir, "snapshots")
+            os.makedirs(snap_dir, exist_ok=True)
+            elapsed = elapsed_before + (time.time() - session_start)
+            save_checkpoint(os.path.join(snap_dir, f"step-{step:06d}.pt"),
+                            model, optimizer, step, config, best_val, elapsed)
+            snaps = sorted(f for f in os.listdir(snap_dir)
+                           if f.startswith("step-") and f.endswith(".pt"))
+            for old in snaps[:-config.snapshots_kept]:
+                os.remove(os.path.join(snap_dir, old))
 
     elapsed = elapsed_before + (time.time() - session_start)
     save_checkpoint(ckpt_path, model, optimizer, config.max_steps - 1,

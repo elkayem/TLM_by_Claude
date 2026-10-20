@@ -22,7 +22,7 @@ import os
 
 import torch
 
-from .config import TLMConfig, checkpoint_dir, data_dir
+from .config import checkpoint_dir, config_from_checkpoint, data_dir
 from .model import TLM
 from .tokenizer import load_tokenizer
 from .train import pick_device
@@ -59,7 +59,7 @@ def main():
     ckpt_path = os.path.join(checkpoint_dir(args.run), args.checkpoint)
     # (map_location: checkpoints saved on the GPU load fine on the CPU.)
     ckpt = torch.load(ckpt_path, weights_only=True, map_location="cpu")
-    config = TLMConfig(**ckpt["config"])
+    config = config_from_checkpoint(ckpt["config"])
     model = TLM(config)
     model.load_state_dict(ckpt["model"])
     model.to(device)

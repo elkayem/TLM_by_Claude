@@ -397,6 +397,126 @@ Directions:
        already runs with execution policy Bypass, so the direct `&` call
        works. Tested 2026-10-16 09:02: the scheduled run finished in 17 s
        with no prompt. Remove the rule along with the task after the run.
+6b. **STOPPED at step 52,000 (2026-10-18 07:27): attention logit growth.**
+   - **Symptom:** the per-genre val losses fell steadily to step 49,500
+     (book 3.17, recipe 1.51, review 2.53, story 3.42, wiki 2.99), then
+     every genre jumped at once at 50,000, nearly recovered at 50,500,
+     and spiked harder at 51,000 and 51,500 (wiki 3.46). Train loss rose
+     too. No restart, reboot, error or GPU warning.
+   - **Diagnosis** (CPU, on copies of the checkpoints):
+     - Layer 1's attention scores: max ~36,000 at step 27,000, **9.2
+       million** at 51,000 (healthy layers: under ~250). 4 of its 12
+       heads had locked onto single tokens (attention entropy ~0) at
+       27,000; 11 of 12 by 51,000. Its query/key weights tripled.
+     - The training gradient norm grew from ~1.4 to ~5–6, mostly from
+       layers 0–1, so clipping at 1.0 cut every other layer's gradient
+       to ~1/6.
+     - AdamW's second moments collapsed: 31M of 127M weights had
+       sqrt(v) < 1e-8 (0.85M at 27,000), including 94–97% of the
+       last four layers' attention weights. Those layers had nearly
+       stopped learning, and their next real gradients became oversized
+       steps: the spikes.
+     - On the same 60 val passages, step 51,000 scored about the same
+       as step 27,000 (genre average 2.86 vs 2.84): the spike erased
+       the progress since 27,000.
+   - **Why no rollback to 49,500:** only `latest.pt` (overwritten every
+     1,000 steps) and `best.pt` (chosen by the noisy mixed val loss, so
+     stuck at 27,000) existed. A copy of `latest.pt` at 51,000 was saved
+     to `~/tlm-checkpoints/mixtape-rescue/` before it was overwritten.
+   - **The first run** is archived as `~/tlm-checkpoints/mixtape-v1`.
+6c. **TRIAL: step 51,000 + QK-norm on layer 1 (launched 2026-10-18 07:42).**
+   - **QK-norm** (`qk_norm`, `qk_norm_layers` in config; off by
+     default): each head's query and key are scaled to RMS 1 times a
+     learned gain, so a score can't exceed ~gain_q · gain_k · sqrt(hs).
+   - **Grafted with `tools/add_qk_norm.py`:** gains = each head's
+     measured query/key RMS, so a typical vector is unchanged; layer 1's
+     11 runaway heads capped to a bound of 30. Measured cost of the
+     graft on the 60 passages: layer 1 only, 2.86 → 3.13; all 16 layers,
+     → 3.63 (healthy layers rely on query/key length, so they were left
+     alone). Fresh AdamW state (the old one was the damage) and
+     `--rewarm 500` (LR ramps up over 500 steps).
+   - **Also new in train.py:**
+     - each eval logs the gradient norm (mean and max since the last
+       eval) and the largest attention score on one val batch
+     - `best.pt` is chosen by the average of the five genre losses
+     - full snapshots every 5,000 steps (newest 3 kept) in
+       `mixtape/snapshots/`
+     - the log gets a header when missing, for seeded runs
+   - The new `mixtape/` holds the step-27,000 model as `best.pt`
+     (genre average 2.8091, the bar to beat) and the first run's log
+     history to step 51,000.
+   - **Pass/fail:** by ~step 54,000 (~3 h) the genre average should be
+     back near **2.75** (the step-49,500 level), with attention scores
+     bounded and the gradient norm back near 1–2. If not, restart from
+     scratch with QK-norm in every layer (~70 h).
+   - `mixtape_status.ps1` now judges by the genre average (alarm at
+     0.15 above its best) and alarms on an attention score > 1,000 or a
+     gradient norm > 8.
+   - **PASSED, within the first eval.** Genre average 2.706 at 51,500
+     (a new best; `best.pt` replaced at 08:10), then 2.747, 2.707,
+     2.713 through 53,000: at or below the pre-spike level (~2.72–2.74).
+     Gradient norm 1.00 in the first 500 steps (max 12 just after the
+     fresh start), then a steady ~0.52, below the first run's ~1.4.
+     Largest attention score 388 → 342 and falling. ~9,700 tok/s.
+     Projected finish **Mon 2026-10-19 ~07:10**.
+   - **Fixed-passage tracking (Larry asked to see the trend):** the
+     training-log evals draw fresh random passages (±0.03 luck), more
+     than the model improves in an hour now. `tools/track_fixed_eval.py`
+     (double-click `tools\track_fixed_eval.cmd`; started 09:47) scores
+     each new `latest.pt` on the same 60 val passages, on the CPU, into
+     `mixtape/fixed-eval.csv`, and stops after the final checkpoint.
+     Seeded with the day's measurements: first run 27,000 = 2.8395,
+     51,000 = 2.8592; graft start 3.1337; trial 51,500 = 2.7144,
+     53,000 = 2.6990 (all five genres better than at 51,500).
+     `mixtape_status.ps1` shows both scores, with the fixed-passage
+     trend, and alarms if that score rises 0.05 above its best, falls
+     behind, or the tracker stops.
+   - **Killed by a Claude app update, 2026-10-18 23:25** (step ~67,700;
+     the 00:19 and 06:19 check-ins flagged it). The trial and the tracker
+     had been launched from inside a Claude session (Start-Process), so
+     Windows counted them as part of the Claude app and stopped them when
+     the app package was serviced. The Explorer-launched GPU logger
+     survived. latest.pt (step 67,000) was intact; ~40 min of training
+     lost, plus 7 idle hours. The nvlddmkm event 153 logged at that
+     second (and at the 07:27 hand stop) is just the driver noting a GPU
+     process killed mid-work.
+   - **Resumed 2026-10-19 06:35 from step 67,001**, both launched through
+     WMI (`Invoke-CimMethod Win32_Process -MethodName Create`): their
+     parent is WmiPrvSE.exe, outside Claude, in the desktop session.
+     (`explorer.exe file.cmd` from a Claude shell is NOT enough: the
+     short-lived explorer.exe it starts is itself inside Claude.)
+     Projected finish ~15:00.
+   - **Stretched to 79,000 steps** at Larry's request, so it finishes
+     when he's home (~17:50) instead of idling from 15:00: `max_steps`
+     76,000 → 79,000, applied by a restart right after the step-68,000
+     checkpoint. The cosine stretches (LR at 68,001: 8.7e-5 instead of
+     7.5e-5) and still ends at min_lr. ~2.59B tokens in all.
+   - **FINISHED 2026-10-19 17:47:** 79,000 steps, 73.7 h of training.
+     Fixed-passage score **2.5860** (book 3.227, recipe 1.361, review
+     2.343, story 3.134, wiki 2.866): 0.13 better than at the fix
+     (51,500), 0.25 better than the first run's step 27,000. Training-
+     log best 2.5590 at step 74,500; that `best.pt` was swapped for the
+     final model (the fixed passages put 74,500 at ~2.595) and kept as
+     `best-step74500.pt`.
+6d. **EXTENSION (Larry's call, launched 2026-10-19 18:09):** 79,000 →
+   117,000 steps (+50%, a second pass over the data), finishing
+   ~Wed 2026-10-21 06:00.
+   - **Schedule:** new config fields `restart_step` / `restart_lr` /
+     `restart_warmup`: from 79,000 the LR climbs 6e-5 → 2e-4 over 1,000
+     steps, then follows a cosine back to 6e-5 at 117,000. The first
+     schedule is unchanged (it now ends at `restart_step`). Old presets
+     unaffected.
+   - **Baseline:** `mixtape/baseline-step79000.pt` (fixed-passage
+     2.5860). Expect the fixed-passage score to RISE for a few thousand
+     steps while the LR is high, then fall. Keep the extension only if
+     it ends at least ~0.03 below the baseline; otherwise the baseline
+     goes back in as `best.pt`.
+   - **Helpers:** the tracker, the GPU logger and `mixtape_status.ps1`
+     now only count a "done." line after the latest launch line (the
+     log already held one from step 79,000). The status script's
+     throughput is the median of the last 4 evals (the first eval after
+     a restart includes startup). All three were launched through WMI,
+     outside Claude. The check-in task now runs through Oct 21.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
@@ -826,6 +946,37 @@ move items from "Coming" to "Ready" when they're built and tested.
   - The ideas are in `tlm/ideas.json`. Users can add their own, and the
     app picks them up on its next launch.
   - `python tools\make_icon.py` redraws `assets/mixtape.ico`.
+
+### Added 2026-10-18 (the restart; fold into the README after the run)
+
+- **Start long runs by double-clicking** `tools\train_mixtape.cmd` (or
+  any `.cmd`) in Explorer, not from inside an AI assistant's or IDE's
+  terminal: a process started by an app dies with it, and the Claude
+  desktop app auto-updates (that stopped the mixtape run overnight on
+  2026-10-18).
+- `tools\train_mixtape.cmd` passes extra options through to train.py,
+  e.g. `tools\train_mixtape.cmd --rewarm 500`.
+- `train.py --rewarm N`: on resume, ramp the LR up over N steps (after
+  checkpoint surgery with a fresh optimizer).
+- Extending a finished run: raise `max_steps` and set `restart_step`
+  (the old last step), `restart_lr` (the rewarm peak) and
+  `restart_warmup` in its preset, then resume (double-click the
+  launcher). Keep a copy of the old final checkpoint as the baseline.
+- `python tools\add_qk_norm.py SRC.pt DST.pt --layers 1
+  --fresh-optimizer --best-val X`: graft QK-norm onto a checkpoint.
+- Config: `qk_norm`, `qk_norm_layers`, `snapshot_interval`,
+  `snapshots_kept`. The mixtape run keeps 3 full snapshots (~1.6 GB
+  each) in `~/tlm-checkpoints/mixtape/snapshots/`.
+- `log.csv` gained `val_genre_mean`, `grad_norm`, `grad_norm_max` and
+  `attn_score_max` columns; `best.pt` now follows `val_genre_mean` when
+  a dataset has per-genre val sets.
+- **QK-norm is ON by default** for new models (Larry's call,
+  2026-10-18). The Stage 1-3 presets set `qk_norm=False`, so they
+  reproduce exactly as documented. Checkpoints saved before the setting
+  existed load with it off (`config_from_checkpoint()` in config.py,
+  used by generate.py, gui.py and the graft tool). Tested: Shakespeare,
+  Stories, Instruct and both mixtape runs load and generate on the CPU;
+  a fresh default model has QK-norm in every layer.
 
 ### Coming (document when built)
 
