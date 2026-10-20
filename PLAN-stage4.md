@@ -456,7 +456,10 @@ Directions:
      (a new best; `best.pt` replaced at 08:10), then 2.747, 2.707,
      2.713 through 53,000: at or below the pre-spike level (~2.72–2.74).
      Gradient norm 1.00 in the first 500 steps (max 12 just after the
-     fresh start), then a steady ~0.52, below the first run's ~1.4.
+     fresh start), then a steady ~0.52. (Not comparable with the ~1.4
+     measured on the CPU at 27,000: that was one 2-sequence fp32 batch,
+     this is a 32-sequence accumulated bf16 step, whose averaging alone
+     shrinks the norm.)
      Largest attention score 388 → 342 and falling. ~9,700 tok/s.
      Projected finish **Mon 2026-10-19 ~07:10**.
    - **Fixed-passage tracking (Larry asked to see the trend):** the
@@ -947,7 +950,11 @@ move items from "Coming" to "Ready" when they're built and tested.
     app picks them up on its next launch.
   - `python tools\make_icon.py` redraws `assets/mixtape.ico`.
 
-### Added 2026-10-18 (the restart; fold into the README after the run)
+### Added 2026-10-18/19 (the restart and extension) — folded into the README on 2026-10-19
+
+Also new on 2026-10-19: `fixed_eval` (on by default; off for the running
+mixtape preset), `tools/sample_sheet.py` (fixed-seed sheets and blind A/B
+comparisons), `tools/plot_mixtape_run.py` (docs/mixtape-run.svg).
 
 - **Start long runs by double-clicking** `tools\train_mixtape.cmd` (or
   any `.cmd`) in Explorer, not from inside an AI assistant's or IDE's
@@ -981,11 +988,15 @@ move items from "Coming" to "Ready" when they're built and tested.
 ### Coming (document when built)
 
 The launcher, the Stage 4 quickstart commands, the README table column
-and the new references were also folded in on 2026-10-16. Left for after
-the run (~2026-10-19):
+and the new references were also folded in on 2026-10-16. On
+2026-10-19 the README table, the Results section and "The run" in
+`docs/10-mixtape.md`, the run chart and a JOURNAL entry were written with
+the step-79,000 results. Left for after the extension (~2026-10-21):
 
-- README table, Stage 4: the actual training time and best val loss
-  (replacing the "TBD" placeholders).
-- `docs/10-mixtape.md` "Results": the final overall and per-genre val
-  losses, prompt-bank samples, and which collisions worked.
-- JOURNAL.md: the run's samples, from `~/tlm-data/mixtape-train.log`.
+- README table and `docs/10-mixtape.md` Results: the extension's numbers
+  and whether it beat the step-79,000 baseline (2.586 on the fixed
+  passages); redraw the chart (`python tools\plot_mixtape_run.py`).
+- A blind A/B sheet, baseline vs extension
+  (`tools/sample_sheet.py ... --compare ...`), for Larry to judge.
+- Delete the `tlm-mixtape-checkin` task and its permission rule; decide
+  on deleting `mixtape-v1` and `mixtape-rescue` (~6 GB).

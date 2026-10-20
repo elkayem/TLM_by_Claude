@@ -970,3 +970,117 @@ The first prompt-bank sample, at step 250 (15 minutes in):
 In December.
 In the Sol was an American of the first at the team was a series of The group of the final of the first of the same year, the government.
 ```
+
+## Stage 4 — the mixtape run (2026-10-16 to 10-19, extension to ~10-21)
+
+Launched 2026-10-16 07:02 for 76,000 steps. A loss spike at step 50,000
+(runaway attention in layer 1), stopped at 52,000, continued from step
+51,000 with QK-norm grafted onto layer 1 (the whole story, with a chart, is
+in docs/10-mixtape.md). Stretched to 79,000 steps and finished 2026-10-19
+17:47 after 73.7 hours of training: genre-average loss 2.586 on 60 fixed
+validation passages. Then extended to 117,000 steps (results to come).
+
+One prompt over the whole run, `Self-Heating Socks for Cats`, 1 star — the
+review format arrives early; sense arrives slowly:
+
+```
+step 3,000
+Dogs dont have a problem
+My dog had a problem; however it was a bit short, and she did not like it. She was already out of the box in a timely manner; and she seems to like it.
+
+step 19,000
+I don't recommend
+My cat hates them. The day she goes after the dog has them she is walking around the house. The day she goes to pick her way out and he goes to get the old house cat. But not the case. She doesn't like them.
+
+step 35,000
+Absolutely DISAPPOINTED!
+I ordered these for my two kittens for Christmas. I'm not happy with them. They have a hard time coming off of them. It's frustrating for both.
+
+step 51,000 (mid-spike)
+My cat would not be comfortable with these, ...
+My cat would not be comfortable with these, even on carpet. If yours is the case, I'll go back to the catnip and use it.
+
+step 75,000
+I really wanted to love these. But they were awful
+I really wanted to love these because my cats (who are normally very hard to please) tend to get their paws caught on these too. I bought 2 packages of these to keep in the car (they're smaller than most) and I could only fit 2 of them on one paw.
+```
+
+And `The Great Spoon Shortage of 1874`, from initials to encyclopedia:
+
+```
+step 1,000
+The G.S. R. R.E. of the two-day Brigate: E. Churches.
+
+step 9,000
+The Great Spoon Shortage of 1874 was a series of the British comedy that the 18th century produced a spin-off of The Great Spoon.
+
+step 79,000
+The Great Spoon Shortage of 1874, also known as the "Great Spoon Shortage of 1864", was a period of debate in France in which the government and the private sector agreed to negotiate agreement in the same way as the international convention. The treaty was ratified on 21 July 1875.
+```
+
+### Samples at step 79,000
+
+From `tools/sample_sheet.py` (46 samples: the prompt bank plus app ideas,
+two fixed seeds each, temperature 0.8); the full sheet is
+`~/tlm-data/samples/mixtape-step79000.md`. Reviews and recipes are the
+strongest genres; stories the weakest (they loop, and being from Reddit,
+sometimes swear or turn dark).
+
+```
+<|review|> Category: Pet Supplies
+Product: Automatic Ball Launcher for Very Lazy Dogs
+Rating: 2/5
+Leaky
+It's a great ball for a beginner dog, but it leaks a lot. I filled it with more air, and it was still leaking. I will be returning it, because it's too much of a hassle to return.
+```
+
+```
+<|review|> Category: Pet Supplies
+Product: Gourmet Bacon-Flavored Toothpaste for Dogs
+Rating: 5/5
+Really helps with poultry and poultry allergies for dogs
+This is the best brush. My dog is allergic to all things bacon. He loves the taste.
+```
+
+```
+<|recipe|> Title: Microwave Souffle for Impatient People
+...
+7. Cover dish and microwave on High for 12 minutes.
+8. Then cook on High 10 minutes.
+9. Then uncover and cook 15 minutes more.
+10. Add mushrooms and cheese.
+11. Let stand for 5 minutes.
+12. Put fresh, frozen in center of dish.
+13. Bake at 350 degrees for 20 minutes.
+```
+
+```
+<|recipe|> Title: The French Revolution
+Ingredients:
+- 1 1/2 cups flour
+- 1 cup butter
+- 1/2 cup water
+Directions:
+1. Mix together the flour, butter and water.
+2. Roll out on floured board and cut out with cookie cutter.
+3. Bake at 350 degrees.
+4. Bake until lightly browned.
+```
+
+```
+<|wiki|> Title: The Duchy of Lower Biscuitshire
+The Duchy of Lower Biscuitshire is a historic castle in the village of North Biscuit on the east bank of the River Trent. It is also the site of a castle, which was destroyed by fire in 1566. ... When the Vicar of the Blessed Virgin was deposed in 1698, the castle was held by him until his death in 1863, when it was destroyed by fire.
+```
+
+```
+<|wiki|> Title: Grandma's Emergency Lasagna
+The Aunt's Emergency Lasagna (formerly known as the Grand Lasagna) is a restaurant located in Auckland, New Zealand.
+
+History
+Prior to the opening of the Grand Lasagna in Auckland, the restaurant was owned by the Auckland City Council and was later owned by the Auckland City Council. After the council's decision to remove the restaurant from the land, the restaurant was later sold to the local media company Auckland City Council.
+```
+
+```
+<|story|> Prompt: The world's least intimidating dragon applies for a bank loan.
+The world's most intimidating dragon applies for bank loans.
+```

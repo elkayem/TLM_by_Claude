@@ -133,6 +133,9 @@ class TLMConfig:
     # ------------------------------------------------------------- logging
     eval_interval: int = 250  # measure val loss every N steps
     eval_iters: int = 50      # batches to average for the val loss estimate
+    fixed_eval: bool = True   # evaluate on the SAME batches every time, so
+                              # the log shows real trends instead of the
+                              # luck of each draw (see train.py)
     sample_interval: int = 1000   # generate a text sample every N steps so
                                   # you can literally watch it learn
     sample_prompts: tuple = ("\n",)  # what each sample starts from; with
@@ -297,6 +300,7 @@ PRESETS = {
         qk_norm=True, qk_norm_layers=(1,),
         batch_size=2, grad_accum=16, max_steps=117000, warmup_steps=2000,
         restart_step=79000, restart_lr=2e-4, restart_warmup=1000,
+        fixed_eval=False,   # it ran with random eval batches throughout
         learning_rate=6e-4, min_lr=6e-5,
         eval_interval=500, eval_iters=20, sample_interval=1000,
         checkpoint_interval=1000, snapshot_interval=5000,

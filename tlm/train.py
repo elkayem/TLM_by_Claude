@@ -91,6 +91,11 @@ def get_batch(data, config, generator, device):
     """
     ix = torch.randint(len(data) - config.block_size - 1,
                        (config.batch_size,), generator=generator)
+    return batch_at(data, ix, config, device)
+
+
+def batch_at(data, ix, config, device):
+    """The batch of block_size-token slices starting at offsets `ix`."""
     # .astype(int64): torch wants int64 indices; the memmap stores uint16
     # to keep the file small (2 bytes/token, fine for vocab < 65536).
     x = torch.stack([torch.from_numpy(
@@ -143,9 +148,28 @@ def get_lr(step, config):
     return config.min_lr + coeff * (config.learning_rate - config.min_lr)
 
 
+def fixed_eval_offsets(splits, config):
+    """FIXED EVALUATION (config.fixed_eval): the same eval_iters batches
+    of each split at every eval, chosen once with a fixed seed.
+
+    Fresh random batches give a slightly different exam each time: Stage
+    4's mixed val set swung by about +/-0.03 on the luck of the draw, more
+    than the model improved between evals late in the run, so the log
+    couldn't show the trend and best.pt went to whichever eval drew easy
+    passages. With the same passages every time, a change in the number
+    is a change in the model.
+    """
+    rng = np.random.default_rng(0)
+    n = config.eval_iters * config.batch_size
+    return {name: rng.integers(0, len(data) - config.block_size - 1, n)
+            for name, data in splits.items()}
+
+
 @torch.no_grad()
-def estimate_loss(model, splits, config, generator, device, autocast):
-    """Average the loss over eval_iters random batches per split.
+def estimate_loss(model, splits, config, generator, device, autocast,
+                  fixed=None):
+    """Average the loss over eval_iters batches per split - random ones,
+    or the same ones every time when `fixed` holds their offsets.
 
     A single batch's loss is noisy (it depends on which slices you drew);
     averaging ~50 batches gives a stable number. torch.no_grad() turns
@@ -160,7 +184,12 @@ def estimate_loss(model, splits, config, generator, device, autocast):
     for name, data in splits.items():
         losses = torch.zeros(config.eval_iters)
         for i in range(config.eval_iters):
-            x, y = get_batch(data, config, generator, device)
+            if fixed is None:
+                x, y = get_batch(data, config, generator, device)
+            else:
+                b = config.batch_size
+                x, y = batch_at(data, fixed[name][i * b:(i + 1) * b],
+                                config, device)
             with autocast:
                 _, loss = model(x, y)
             losses[i] = loss.item()
@@ -267,6 +296,7 @@ def main():
                                        dtype=np.uint16, mode="r")
     tokenizer = load_tokenizer(os.path.join(ddir, "tokenizer.json"))
     config.vocab_size = tokenizer.vocab_size
+    fixed = fixed_eval_offsets(splits, config) if config.fixed_eval else None
 
     # ---- model & optimizer
     # The weights are initialized on the CPU (under the seed above, so a
@@ -411,7 +441,7 @@ def main():
         # ---- periodic evaluation & logging
         if step % config.eval_interval == 0 or step == config.max_steps - 1:
             losses = estimate_loss(model, splits, config, generator,
-                                   device, autocast)
+                                   device, autocast, fixed)
             dt = time.time() - t0
             tps = tokens_since / dt if dt > 0 else 0.0
             elapsed = elapsed_before + (time.time() - session_start)
@@ -435,7 +465,11 @@ def main():
             # largest attention score on one val batch (see QK-norm in
             # model.py for why that one matters).
             model.eval()
-            xb, _ = get_batch(splits["val"], config, generator, device)
+            if fixed is None:
+                xb, _ = get_batch(splits["val"], config, generator, device)
+            else:      # the same batch every time, so evals compare
+                xb, _ = batch_at(splits["val"], fixed["val"][:config.batch_size],
+                                 config, device)
             with autocast:
                 attn_max = max(model.attention_score_max(xb))
             model.train()

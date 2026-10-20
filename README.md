@@ -17,12 +17,18 @@ commented well enough that I could understand the inner mechanics. -Larry
 | Tokenizer | character-level (65 tokens) | BPE, trained from scratch (4096) | new BPE (4096) + `<\|endoftext\|>` special token | new BPE (16,384) + `<\|endoftext\|>` + five genre tags |
 | Size | ~2.7M parameters | ~7.4M parameters | ~27M parameters | ~126M parameters |
 | Context | 256 tokens | 256 tokens | 512 tokens | 1,024 tokens |
-| Training time | 2 hours (CPU); ~10 minutes on the GPU (est.)† | 56 hours (CPU, the long weekend); ~2–3 hours on the GPU (est.)† | 118 hours (CPU, 5 days); ~4.5 hours on the GPU (est.)† | ~3.1 days (GPU, estimated from the pilot) — *final: TBD* |
-| Best val loss | 1.609 | 1.595 | 1.257* | *TBD (run finishing ~2026-10-19)* |
+| Training time | 2 hours (CPU); ~10 minutes on the GPU (est.)† | 56 hours (CPU, the long weekend); ~2–3 hours on the GPU (est.)† | 118 hours (CPU, 5 days); ~4.5 hours on the GPU (est.)† | 73.7 hours (GPU, RTX 3050) for 79,000 steps; an extension to 117,000 is running (~36 more hours) |
+| Best val loss | 1.609 | 1.595 | 1.257* | 2.586*‡ at step 79,000 (extension: *TBD, ~2026-10-21*) |
 | What you get | fake Shakespeare | coherent little children's stories | stories to order: give it a summary, required words, or features | articles, novels, reviews, recipes and stories on any premise — and deliberate genre collisions (a recipe for "The French Revolution") |
 
 \* Not comparable across columns: each model is scored under its own
 tokenizer and dataset, which changes what "loss per token" means.
+
+‡ The average of the five genres' losses, measured on the same 60
+validation passages for every checkpoint (Stage 4 mixes genres whose
+losses range from ~1.4 for recipes to ~3.2 for old books). The story of
+the run, including a loss spike and its repair, is in
+[docs/10-mixtape.md](docs/10-mixtape.md).
 
 † Estimates, not yet measured end to end (the CPU times are measured).
 Stage 3's comes from its 1,000-step GPU calibration run: 32,700 tok/s, or
@@ -127,7 +133,11 @@ python data\prepare_mixtape.py              # ~35 GB download + prep (~1 hour)
 python data\prepare_mixtape.py inspect      # look at the result
 python -m tlm.train --config mixtape-pilot  # ~30 min: speed + memory check
 tools\train_mixtape.cmd                     # the ~3-day run (double-clickable)
+tools\track_fixed_eval.cmd                  # score each checkpoint on fixed passages
 python tools\make_shortcut.py               # put the Mixtape app on the desktop
+python tools\plot_mixtape_run.py            # redraw docs/mixtape-run.svg from the logs
+python tools\sample_sheet.py CKPT --out samples.md        # fixed-seed sample sheet
+python tools\sample_sheet.py A.pt --compare B.pt --out blind.md   # blind A/B test
 ```
 
 While training, a text sample is printed every 500–1000 steps — watching the
@@ -167,7 +177,33 @@ picks up where it stopped (including the elapsed-time clock). For Stage 4,
 run in its own window, and again after any restart — it adds `--resume`
 when a checkpoint exists, and copies everything the run prints to
 `~/tlm-data/mixtape-train.log`. (`TLM_PYTHON` overrides which python it
-uses; the default is `%USERPROFILE%\tlm-venv`.)
+uses; the default is `%USERPROFILE%\tlm-venv`.) Start it from Explorer,
+not from inside another app's terminal or an AI assistant: a program
+started by an app can be stopped with it (a Claude app update stopped the
+Stage 4 run once). Extra options pass through to `train.py`, e.g.
+`tools\train_mixtape.cmd --rewarm 500`.
+
+**Watching a long run.** Each eval logs the gradient norm and the largest
+attention score (`grad_norm`, `grad_norm_max`, `attn_score_max` in
+`log.csv`, and a "health" line in the output): a gradient norm that keeps
+climbing, or attention scores heading into the thousands, are early
+warnings of a loss spike. New runs evaluate on the same batches every time
+(`fixed_eval`), so the log shows trends rather than luck, and `best.pt`
+follows the average of the per-genre val losses when a dataset has them.
+`snapshot_interval` keeps a full checkpoint every N steps (the newest
+`snapshots_kept`) in `snapshots/`, so there's always something to roll
+back to.
+
+**Attention stability.** New models use QK-norm (`qk_norm`, on by
+default; the Stage 1–3 presets keep it off and load exactly as before).
+`python tools\add_qk_norm.py SRC.pt DST.pt --layers 1 --fresh-optimizer`
+grafts it onto a checkpoint trained without it; resume that with
+`--rewarm N` (see docs/10-mixtape.md for the whole story).
+
+**Extending a finished run:** raise `max_steps` and set `restart_step`
+(the old last step), `restart_lr` (the rewarm peak) and `restart_warmup`
+in its preset, then resume. Keep a copy of the old final checkpoint to
+compare against.
 
 ## The Mixtape app
 
@@ -215,7 +251,7 @@ Then read in order, next to the code file each chapter covers:
 8. [07-sampling.md](docs/07-sampling.md) — generating text (`generate.py`, `TLM.generate`)
 9. [08-instruct.md](docs/08-instruct.md) — Stage 3: instruction following, special tokens, fine-tuning
 10. [09-gpu.md](docs/09-gpu.md) — Stage 4a: devices, mixed precision, fused attention, gradient accumulation
-11. [10-mixtape.md](docs/10-mixtape.md) — Stage 4: data mixtures, control tokens, a faster BPE trainer, the KV cache and the app
+11. [10-mixtape.md](docs/10-mixtape.md) — Stage 4: data mixtures, control tokens, a faster BPE trainer, the KV cache and the app; a loss spike diagnosed and repaired with QK-norm
 
 ## Layout
 
@@ -242,6 +278,12 @@ tlm/
 │   └── prepare_mixtape.py
 ├── tools/
 │   ├── train_mixtape.cmd/.ps1   start or resume the Stage 4 run
+│   ├── track_fixed_eval.py/.cmd score each checkpoint on fixed val passages
+│   ├── add_qk_norm.py           graft QK-norm onto a trained checkpoint
+│   ├── sample_sheet.py          fixed-seed samples; blind A/B comparisons
+│   ├── plot_mixtape_run.py      draws docs/mixtape-run.svg
+│   ├── gpu_health.cmd/.ps1      GPU temperature/health log during a run
+│   ├── mixtape_status.ps1       one-shot health report of the Stage 4 run
 │   ├── make_shortcut.py         desktop shortcut for the app
 │   └── make_icon.py             draws assets/mixtape.ico
 ├── assets/              the app icon
@@ -322,6 +364,11 @@ point to in this repo's code.
   Controllable Generation"](https://arxiv.org/abs/1909.05858) (2019) —
   control codes: steering generation with source tags, the idea behind
   Stage 4's genre tags.
+- Henry et al., ["Query-Key Normalization for
+  Transformers"](https://arxiv.org/abs/2010.04245) (2020), and Dehghani et
+  al., ["Scaling Vision Transformers to 22 Billion
+  Parameters"](https://arxiv.org/abs/2302.05442) (2023) — QK-norm, and the
+  attention logit growth it prevents (`model.py: CausalSelfAttention`).
 
 ### Training & sampling
 
@@ -340,6 +387,14 @@ point to in this repo's code.
   Models"](https://arxiv.org/abs/2305.16264) (2023) — repeating data for up
   to ~4 passes is nearly as good as fresh data; the basis for repeating the
   smaller Stage 4 sources.
+- Wortsman et al., ["Small-scale proxies for large-scale Transformer
+  training instabilities"](https://arxiv.org/abs/2309.14322) (2023) —
+  attention logit growth reproduced in small models at high learning
+  rates; what Stage 4's first run ran into.
+- Ibrahim et al., ["Simple and Scalable Strategies to Continually
+  Pre-train Large Language Models"](https://arxiv.org/abs/2403.08763)
+  (2024) — re-warming and re-decaying the learning rate to keep training
+  a finished model (Stage 4's extension).
 - Holtzman et al., ["The Curious Case of Neural Text
   Degeneration"](https://arxiv.org/abs/1904.09751) (2019) — nucleus (top-p)
   sampling and why greedy decoding degenerates (`model.py: generate`).
