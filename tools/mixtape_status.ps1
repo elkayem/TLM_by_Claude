@@ -22,6 +22,10 @@ $evalCsv = Join-Path $ckpt "mixtape\log.csv"
 $trainLog = Join-Path $data "mixtape-train.log"
 $healthCsv = Join-Path $data "gpu-health.csv"
 $report = Join-Path $data "mixtape-checkins.md"
+# The extension (from step 79,000) re-warms the LR to 2e-4 by step 80,000,
+# which RAISES the loss for a while by design. From then on, alarms compare
+# against the best since 80,000; the step-79,000 baseline is shown apart.
+$settleStep, $baseline = 80000, 2.5860
 $maxSteps, $tokensPerStep = 117000, 32768   # 76,000, then 79,000, until the extension
 $now = Get-Date
 $problems = New-Object System.Collections.Generic.List[string]
@@ -61,7 +65,9 @@ if ($rows.Count -lt 2) {
         $r = $_; ($genres | ForEach-Object { [double]$r."val_$_" } |
             Measure-Object -Average).Average }
     $mean = $vals[-1]
-    $best = ($vals | Measure-Object -Minimum).Minimum
+    $since = @(for ($i = 0; $i -lt $rows.Count; $i++) {
+        if ([int]$rows[$i].step -ge $settleStep) { $vals[$i] } })
+    $best = (($(if ($since.Count) { $since } else { $vals })) | Measure-Object -Minimum).Minimum
     $age = ($now - (Get-Item -LiteralPath $evalCsv).LastWriteTime).TotalMinutes
     # The MEDIAN of the last 4 evals: the first eval after a (re)start
     # includes startup time and would drag an average down.
@@ -106,12 +112,18 @@ if (Test-Path $fixedCsv) {
         $_.note -notlike "first run*" -and $_.note -notlike "trial start*" })
     if ($trend.Count) {
         $lastF = $trend[-1]
-        $bestF = ($trend | ForEach-Object { [double]$_.mean } | Measure-Object -Minimum).Minimum
+        $judged = @($trend | Where-Object { [int]$_.step -ge $settleStep })
+        if (-not $judged.Count) { $judged = $trend }
+        $bestF = ($judged | ForEach-Object { [double]$_.mean } | Measure-Object -Minimum).Minimum
         $steps = ($trend | Select-Object -Last 6 | ForEach-Object {
             "{0:N0}: {1}" -f [int]$_.step, $_.mean }) -join " -> "
         $lines.Add(("- Fixed-passage score (same 60 passages every checkpoint): {0} at step {1:N0} (best {2:N4})" -f
                     $lastF.mean, [int]$lastF.step, $bestF))
         $lines.Add("  - trend: $steps")
+        if ([int]$lastF.step -ge $settleStep) {
+            $lines.Add(("  - vs the step-79,000 baseline {0:N4}: {1:+0.0000;-0.0000} (the extension must end below it)" -f
+                        $baseline, ([double]$lastF.mean - $baseline)))
+        }
         if ([double]$lastF.mean -gt $bestF + 0.05) {
             $problems.Add(("fixed-passage score {0} is more than 0.05 above its best {1:N4}" -f $lastF.mean, $bestF))
         }
