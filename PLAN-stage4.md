@@ -520,6 +520,14 @@ Directions:
      throughput is the median of the last 4 evals (the first eval after
      a restart includes startup). All three were launched through WMI,
      outside Claude. The check-in task now runs through Oct 21.
+   - **Ready for Wednesday morning:** `tools/after_run.py` (launched
+     through WMI on 2026-10-19, window "TLM after-run watcher") waits for
+     the extension's "done.", then scores the baseline and the final
+     model on the fixed passages, writes
+     `~/tlm-data/samples/extension-summary.md` (per-genre table and a
+     keep/restore verdict: keep if ≥ 0.03 better), a blind A/B sheet
+     `extension-blind.md` (key in `extension-blind.key.json`), and
+     redraws the chart. Log: `~/tlm-data/after-run.log`.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
