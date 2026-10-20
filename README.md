@@ -181,7 +181,12 @@ uses; the default is `%USERPROFILE%\tlm-venv`.) Start it from Explorer,
 not from inside another app's terminal or an AI assistant: a program
 started by an app can be stopped with it (a Claude app update stopped the
 Stage 4 run once). Extra options pass through to `train.py`, e.g.
-`tools\train_mixtape.cmd --rewarm 500`.
+`tools\train_mixtape.cmd --rewarm 500`. If the GPU runs out of memory
+(it also drives the desktop, and other programs can take some), the step
+is retried after a minute; if training crashes anyway, the launcher
+resumes from the last checkpoint by itself after 2 minutes, up to 10
+times. Closing GPU-hungry programs during a long run helps (Edge keeps
+running in the background with "startup boost" on).
 
 **Watching a long run.** Each eval logs the gradient norm and the largest
 attention score (`grad_norm`, `grad_norm_max`, `attn_score_max` in

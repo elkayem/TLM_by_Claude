@@ -30,7 +30,9 @@ import contextlib
 import csv
 import math
 import os
+import sys
 import time
+import traceback
 
 import numpy as np
 import torch
@@ -236,6 +238,46 @@ def save_checkpoint(path, model, optimizer, step, config, best_val, elapsed):
     os.replace(tmp, path)   # still locked after a minute: let the error show
 
 
+# A GPU that also drives the desktop shares its memory with every other
+# program: if one grabs some mid-run, the next step can fail with "out of
+# memory" (Stage 4's run crashed that way once). Such a step is retried.
+OOM_ERRORS = (torch.OutOfMemoryError,
+              getattr(torch, "AcceleratorError", RuntimeError))
+OOM_RETRIES = 3
+
+
+def train_step(model, optimizer, splits, config, generator, device, autocast):
+    """One optimizer step, (1) to (4). Returns the gradient norm from before
+    clipping."""
+    optimizer.zero_grad(set_to_none=True)
+    # Steps (1)-(3) run grad_accum times per optimizer step (once for
+    # every preset before Stage 4). Because backward() accumulates,
+    # the micro-batches' gradients add up in .grad; dividing each loss
+    # by grad_accum makes the sum the gradient of the AVERAGE loss -
+    # exactly what one big batch would have produced.
+    for _ in range(config.grad_accum):
+        # (1) sample a batch
+        x, y = get_batch(splits["train"], config, generator, device)
+        # (2) forward: predictions + loss
+        with autocast:
+            _, loss = model(x, y)
+        # (3) backward: add this batch's share to .grad on every
+        # parameter.
+        (loss / config.grad_accum).backward()
+    # Gradient clipping: if the overall gradient vector is longer than
+    # grad_clip, rescale it to that length. Direction is kept; only
+    # the size of the step is capped. Insurance against the occasional
+    # weird batch producing a weight-wrecking gradient spike.
+    # It returns the norm from BEFORE clipping, which we log: a gradient
+    # norm that keeps climbing is an early warning (in Stage 4's first
+    # run it went from ~1.4 to ~6 before the loss spiked).
+    gn = torch.nn.utils.clip_grad_norm_(model.parameters(),
+                                        config.grad_clip).item()
+    # (4) apply the update
+    optimizer.step()
+    return gn
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train the TLM")
     parser.add_argument("--config", default="shakespeare",
@@ -408,33 +450,22 @@ def main():
             group["lr"] = lr
 
         # zero_grad first because backward() ACCUMULATES into .grad.
-        optimizer.zero_grad(set_to_none=True)
-        # Steps (1)-(3) run grad_accum times per optimizer step (once for
-        # every preset before Stage 4). Because backward() accumulates,
-        # the micro-batches' gradients add up in .grad; dividing each loss
-        # by grad_accum makes the sum the gradient of the AVERAGE loss -
-        # exactly what one big batch would have produced.
-        for _ in range(config.grad_accum):
-            # (1) sample a batch
-            x, y = get_batch(splits["train"], config, generator, device)
-            # (2) forward: predictions + loss
-            with autocast:
-                _, loss = model(x, y)
-            # (3) backward: add this batch's share to .grad on every
-            # parameter.
-            (loss / config.grad_accum).backward()
-        # Gradient clipping: if the overall gradient vector is longer than
-        # grad_clip, rescale it to that length. Direction is kept; only
-        # the size of the step is capped. Insurance against the occasional
-        # weird batch producing a weight-wrecking gradient spike.
-        # It returns the norm from BEFORE clipping, which we log: a gradient
-        # norm that keeps climbing is an early warning (in Stage 4's first
-        # run it went from ~1.4 to ~6 before the loss spiked).
-        gn = torch.nn.utils.clip_grad_norm_(model.parameters(),
-                                            config.grad_clip).item()
+        # (1)-(4): one optimizer step - see train_step() above.
+        for attempt in range(OOM_RETRIES + 1):
+            try:
+                gn = train_step(model, optimizer, splits, config, generator,
+                                device, autocast)
+                break
+            except OOM_ERRORS as err:
+                if "out of memory" not in str(err) or attempt == OOM_RETRIES:
+                    raise
+                optimizer.zero_grad(set_to_none=True)
+                torch.cuda.empty_cache()
+                print(f"step {step}: GPU out of memory (another program may "
+                      f"have taken some); retrying in 60 s "
+                      f"({attempt + 1}/{OOM_RETRIES})", flush=True)
+                time.sleep(60)
         gn_sum, gn_max, gn_n = gn_sum + gn, max(gn_max, gn), gn_n + 1
-        # (4) apply the update
-        optimizer.step()
 
         tokens_since += tokens_per_step
 
@@ -549,4 +580,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # After a crash, CUDA doesn't always shut down cleanly: Stage 4's
+        # run once hung for hours after one, still holding the GPU. So print
+        # the error and exit hard, with code 3, which
+        # tools\train_mixtape.ps1 reads as "crashed: resume from the last
+        # checkpoint". (Ctrl+C and argument errors exit normally.)
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(3)

@@ -528,6 +528,23 @@ Directions:
      keep/restore verdict: keep if ≥ 0.03 better), a blind A/B sheet
      `extension-blind.md` (key in `extension-blind.key.json`), and
      redraws the chart. Log: `~/tlm-data/after-run.log`.
+   - **Crashed 2026-10-19 19:44:56 at step ~80,800: "CUDA error: out of
+     memory".** Training leaves only ~1 GB of the 6 GB card free (the card
+     also drives the desktop); something else took GPU memory - likely
+     Edge, running in the background since 16:59 (startup boost; its GPU
+     process is a GPU client, and it started new renderers at 19:45:01).
+     Worse, the process then HUNG on exit (one core spinning, GPU memory
+     held), so the check-in saw a live process; found at 22:40 by a manual
+     check ("no new eval in 185 min", GPU idle). Killed; ~3.5 h lost.
+   - **Fixes (train.py, train_mixtape.ps1):** a step that fails with GPU
+     out-of-memory is retried 3 times, 60 s apart (`train_step()`,
+     `OOM_RETRIES`); any other crash prints the traceback and exits hard
+     with code 3 (`os._exit`), so CUDA can't hang it; the launcher resumes
+     from the last checkpoint after a code-3 exit, 2 minutes later, up to
+     10 times (`TLM_RESUME_WAIT` overrides the wait). Tested on the CPU:
+     a crash exits 3, argument errors exit 2, a simulated OOM is retried,
+     and the launcher resumes after a simulated crash.
+   - **Resumed 22:44 from step 80,001** (WMI); finish now ~Wed 09:30.
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
