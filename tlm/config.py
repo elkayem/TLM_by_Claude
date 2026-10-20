@@ -159,9 +159,14 @@ def config_from_checkpoint(saved):
 
     A field added since the checkpoint was saved takes its default - except
     qk_norm: checkpoints that don't mention it predate QK-norm and were
-    trained without it, so it has to stay off for them to load.
+    trained without it, so it has to stay off for them to load. A field
+    this code doesn't know (a checkpoint newer than the code reading it)
+    is ignored: a program started before a setting was added must still
+    load checkpoints that mention it.
     """
-    return TLMConfig(**{"qk_norm": False, **saved})
+    known = TLMConfig.__dataclass_fields__
+    return TLMConfig(**{"qk_norm": False,
+                        **{k: v for k, v in saved.items() if k in known}})
 
 
 # Training samples for the mixtape presets take turns through these, so the
