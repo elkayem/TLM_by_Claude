@@ -17,8 +17,8 @@ commented well enough that I could understand the inner mechanics. -Larry
 | Tokenizer | character-level (65 tokens) | BPE, trained from scratch (4096) | new BPE (4096) + `<\|endoftext\|>` special token | new BPE (16,384) + `<\|endoftext\|>` + five genre tags |
 | Size | ~2.7M parameters | ~7.4M parameters | ~27M parameters | ~126M parameters |
 | Context | 256 tokens | 256 tokens | 512 tokens | 1,024 tokens |
-| Training time | 2 hours (CPU); ~10 minutes on the GPU (est.)† | 56 hours (CPU, the long weekend); ~2–3 hours on the GPU (est.)† | 118 hours (CPU, 5 days); ~4.5 hours on the GPU (est.)† | 73.7 hours (GPU, RTX 3050) for 79,000 steps; an extension to 117,000 is running (~36 more hours) |
-| Best val loss | 1.609 | 1.595 | 1.257* | 2.586*‡ at step 79,000 (extension: *TBD, ~2026-10-21*) |
+| Training time | 2 hours (CPU); ~10 minutes on the GPU (est.)† | 56 hours (CPU, the long weekend); ~2–3 hours on the GPU (est.)† | 118 hours (CPU, 5 days); ~4.5 hours on the GPU (est.)† | 109 hours (GPU, RTX 3050): 79,000 steps, then extended to 117,000 |
+| Best val loss | 1.609 | 1.595 | 1.257* | 2.565*‡ (2.586 before the extension) |
 | What you get | fake Shakespeare | coherent little children's stories | stories to order: give it a summary, required words, or features | articles, novels, reviews, recipes and stories on any premise — and deliberate genre collisions (a recipe for "The French Revolution") |
 
 \* Not comparable across columns: each model is scored under its own

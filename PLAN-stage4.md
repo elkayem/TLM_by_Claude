@@ -545,6 +545,36 @@ Directions:
      a crash exits 3, argument errors exit 2, a simulated OOM is retried,
      and the launcher resumes after a simulated crash.
    - **Resumed 22:44 from step 80,001** (WMI); finish now ~Wed 09:30.
+   - **Tracker crashed ~23:40** on the first checkpoint from the 22:44
+     launch: started at 18:09, its code predated `fixed_eval`, which the
+     new checkpoints record, and `TLMConfig(**saved)` rejected the unknown
+     key. `config_from_checkpoint()` now ignores unknown keys. Restarted
+     2026-10-20 05:35 (and the after-run watcher, on the same code);
+     85,000 backfilled from its snapshot; 81-84,000 and 86,000 are lost.
+     Training itself ran clean overnight. (The WER "BlueScreen" /
+     "LiveKernelEvent" reports in the Application log are retries of
+     reports from January, not new events.)
+   - **Extension so far (fixed passages):** 79,000 2.586 → 80,000 2.654 →
+     85,000 2.672 → 87,000 2.671: still rising/flat with the LR near its
+     2e-4 peak; it has to come down as the LR decays.
+   - **At equal learning rates** the extension was 0.02-0.03 better than the
+     first run all the way down (e.g. LR 1.2e-4: step 100,000 2.623 vs
+     step 60,000 2.650), though at step 100,000 it was still above the
+     annealed baseline: a high LR adds a loss penalty that only goes away
+     at the floor.
+   - **FINISHED 2026-10-21 ~09:28:** 117,000 steps (3.83B tokens, ~1.5
+     passes), 109.4 h of training in all. Fixed passages: **2.5645**
+     (book 3.197, recipe 1.353, review 2.338, story 3.104, wiki 2.831),
+     0.0215 better than the step-79,000 baseline, in every genre (~0.03 in
+     wiki/book/story, < 0.01 in recipe/review). Under the 0.03 bar, so
+     the watcher said "let the blind test decide"; Larry chose to keep the
+     final model without comparing. `best.pt` = the final model. No
+     crashes after the 2026-10-19 fixes.
+   - **Wrap-up 2026-10-21:** check-in task deleted and its permission rule
+     removed; README, docs/10 and JOURNAL finalized; idle helper windows
+     closed. Kept for Larry to decide: `mixtape-v1` (3.0 GB),
+     `mixtape-rescue` (3.0 GB), `mixtape/snapshots` (4.4 GB),
+     `baseline-step79000.pt` and `best-step74500.pt` (1.5 GB each).
 7. ~~The Mixtape app~~ **BUILT AND TESTED (2026-10-16)**, ahead of
    schedule, while waiting on RecipeNLG. Developed against the
    `mixtape-smoke` model; it loads the real one once trained.
@@ -1016,12 +1046,8 @@ The launcher, the Stage 4 quickstart commands, the README table column
 and the new references were also folded in on 2026-10-16. On
 2026-10-19 the README table, the Results section and "The run" in
 `docs/10-mixtape.md`, the run chart and a JOURNAL entry were written with
-the step-79,000 results. Left for after the extension (~2026-10-21):
-
-- README table and `docs/10-mixtape.md` Results: the extension's numbers
-  and whether it beat the step-79,000 baseline (2.586 on the fixed
-  passages); redraw the chart (`python tools\plot_mixtape_run.py`).
-- A blind A/B sheet, baseline vs extension
-  (`tools/sample_sheet.py ... --compare ...`), for Larry to judge.
-- Delete the `tlm-mixtape-checkin` task and its permission rule; decide
-  on deleting `mixtape-v1` and `mixtape-rescue` (~6 GB).
+the step-79,000 results, and finalized with the extension's on
+2026-10-21 (chart redrawn by `tools/after_run.py`; blind A/B sheet in
+`~/tlm-data/samples/`; check-in task and permission rule removed). Still
+open: the GPU validation of the Stage 1-2 estimates ("Later / optional"),
+and deleting the old checkpoints listed above (Larry's call).

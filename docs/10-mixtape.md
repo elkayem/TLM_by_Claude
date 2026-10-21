@@ -323,6 +323,14 @@ its `best.pt` follow the model rather than the draw.
   run (relaunched from a chat session after the repair), and it sat idle
   for 7 hours. A run started by double-clicking `tools\train_mixtape.cmd`
   in Explorer belongs to nobody else.
+- **Share the GPU gracefully.** Training used ~4 GB of the 6 GB card that
+  also draws the desktop. During the extension another program (probably
+  the browser, running in the background) took some of the rest, a step
+  failed with "CUDA error: out of memory" — and the process then hung on
+  its way out for 3 hours, still holding the GPU, so it looked alive.
+  Now a step that runs out of GPU memory is retried after a minute, any
+  other crash exits at once (code 3) instead of hanging, and the launcher
+  resumes from the last checkpoint by itself.
 
 ### Stretched, then extended
 
@@ -340,29 +348,42 @@ The fixed-passage score *rises* while the learning rate is high (2.586 →
 2.654 by step 80,000) and has to come back below the step-79,000 baseline
 to be worth keeping.
 
+It did, modestly. Halfway down, at step 100,000, the extended model still
+scored *worse* than the baseline (2.623) — but comparing models at
+different learning rates mixes up two things: what the model knows, and a
+penalty for taking big steps, which keep the weights jittering around the
+best spot. Compared with the first run at the *same* learning rate on its
+way down, the extended model was 0.02–0.03 better all the way. When the
+learning rate reached its floor again, at step 117,000 on 2026-10-21, the
+penalty was gone and the gain showed: **2.565, 0.021 better than the
+baseline, in every genre** — most in wiki, books and stories (~0.03 each),
+least in recipes and reviews (< 0.01), which were already about as
+predictable as they get. 35 more hours bought 0.021: diminishing returns,
+as the scaling laws promise, but real.
+
 ## Results
 
-*At step 79,000; the extension's results will be added when it finishes
-(~2026-10-21).*
-
-2.59 billion tokens, 73.7 hours on the RTX 3050. On the 60 fixed
-validation passages (lower is better; not comparable to other stages'
-losses, as the README's footnote explains):
+117,000 steps — 3.83 billion tokens, about 1.5 passes over the data — in
+109.4 hours of training on the RTX 3050. On the 60 fixed validation
+passages (lower is better; not comparable to other stages' losses, as the
+README's footnote explains):
 
 | | book | recipe | review | story | wiki | **average** |
 |---|---|---|---|---|---|---|
 | first run, step 27,000 | 3.515 | 1.512 | 2.634 | 3.384 | 3.153 | 2.840 |
 | just after the QK-norm graft | 3.777 | 1.849 | 2.909 | 3.665 | 3.469 | 3.134 |
 | 500 steps later, step 51,500 | 3.372 | 1.435 | 2.495 | 3.267 | 3.003 | 2.714 |
-| **finished, step 79,000** | **3.227** | **1.361** | **2.343** | **3.134** | **2.866** | **2.586** |
+| end of the first schedule, step 79,000 | 3.227 | 1.361 | 2.343 | 3.134 | 2.866 | 2.586 |
+| **after the extension, step 117,000** | **3.197** | **1.353** | **2.338** | **3.104** | **2.831** | **2.565** |
 
 Recipes are easiest to predict, then reviews; books are hardest (an old
 novel is less predictable than an ingredient list, which says nothing
 about which the model "writes better").
 
-**What it writes.** From a sheet of 46 samples (`tools/sample_sheet.py`:
-the prompt bank plus ideas from `tlm/ideas.json`, two fixed seeds each,
-temperature 0.8):
+**What it writes.** From a sheet of 46 samples of the step-79,000 model
+(`tools/sample_sheet.py`: the prompt bank plus ideas from
+`tlm/ideas.json`, two fixed seeds each, temperature 0.8); the extended
+model writes the same way:
 
 - **Reviews** are the best genre: the right tone, the right length, and
   the star rating steers the opinion. *Self-Heating Socks for Cats*, 1/5:
@@ -381,7 +402,10 @@ temperature 0.8):
   Shortage of 1864'"; *The Duchy of Lower Biscuitshire* is a castle
   "destroyed by fire in 1566", and again in 1863.
 - **Books** are plausible 19th-century prose that wanders, often away
-  from the title entirely ("There were three cows in the kitchen.").
+  from the title entirely ("There were three cows in the kitchen."). They
+  sometimes contain placeholders like `<DW64>`: PG-19's text has ~50,000
+  of them where its publishers masked certain (apparently offensive)
+  words, and the model learned to write them too.
 - **Stories** are the weakest: they loop ("I'm not a cat. I'm not a cat.")
   and, because they come from Reddit's WritingPrompts, sometimes swear or
   take a dark turn — worth knowing before handing the app to a child.

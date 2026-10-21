@@ -971,14 +971,14 @@ In December.
 In the Sol was an American of the first at the team was a series of The group of the final of the first of the same year, the government.
 ```
 
-## Stage 4 — the mixtape run (2026-10-16 to 10-19, extension to ~10-21)
+## Stage 4 — the mixtape run (2026-10-16 to 10-21)
 
 Launched 2026-10-16 07:02 for 76,000 steps. A loss spike at step 50,000
 (runaway attention in layer 1), stopped at 52,000, continued from step
 51,000 with QK-norm grafted onto layer 1 (the whole story, with a chart, is
 in docs/10-mixtape.md). Stretched to 79,000 steps and finished 2026-10-19
 17:47 after 73.7 hours of training: genre-average loss 2.586 on 60 fixed
-validation passages. Then extended to 117,000 steps (results to come).
+validation passages. Then extended to 117,000 steps (below).
 
 One prompt over the whole run, `Self-Heating Socks for Cats`, 1 star — the
 review format arrives early; sense arrives slowly:
@@ -1083,4 +1083,68 @@ Prior to the opening of the Grand Lasagna in Auckland, the restaurant was owned 
 ```
 <|story|> Prompt: The world's least intimidating dragon applies for a bank loan.
 The world's most intimidating dragon applies for bank loans.
+```
+
+### The extension (2026-10-19 to 10-21)
+
+Steps 79,000 to 117,000, rewarming the learning rate to 2e-4 and annealing
+it again. One crash on the way (GPU out of memory, then a hang on exit;
+fixed with a retry, a hard exit and auto-resume). The fixed-passage score
+rose to 2.672 while the learning rate was high, crossed back below the
+baseline around step 108,000, and finished at **2.5645**: 0.021 better
+than step 79,000, in every genre (most in wiki, books and stories). The
+final model is the one the app loads. Total training time: 109.4 hours.
+
+Samples from the final model (`~/tlm-data/samples/mixtape-final-step117000.md`,
+same prompts and seeds as the step-79,000 sheet):
+
+```
+<|review|> Category: Toys and Games
+Product: The Moon
+Rating: 2/5
+Don't recommend
+This is a nice game. But be aware that it is NOT made to be played on a flat surface. It is hard and uncomfortable to play. Also, it does not work well on a flat surface.
+```
+
+```
+<|review|> Category: Pet Supplies
+Product: Goldfish Treadmill
+Rating: 1/5
+Doesn't last long time
+This product made my fish really sick. I've been using it for about 2.5 years now and I've had it for about a month.
+```
+
+```
+<|wiki|> Title: Grandma's Emergency Lasagna
+The Misses' Emergency Lasagna (MAD) was an American airline based in Madison, Wisconsin. It operated flights to and from St. Louis and to Washington, D.C.
+
+History
+The company was founded in 1883 by J.F. McMurdo and Company in Milwaukee.
+...
+Casualties
+The airline suffered 1,034 injuries during its service life
+```
+
+```
+<|wiki|> Title: Grandma's Emergency Lasagna
+Mahsa's Emergency Lasagna is a 1970 American drama film directed by James Weisman and starring Eddie Carter, James Ruggiero and Lena Horne.
+...
+Cast
+Eddie Carter as Father Walter
+Lena Horne as Caroline
+Norman Fields as Mrs. Henderson
+```
+
+```
+<|wiki|> Title: The Treaty of Mild Annoyance
+The Treaty of Mild Annoyance, also called the Treaty of the Inquisition, was signed on 2 October 1604, at the Palace of Mild Annoyance. ... It was signed by six councillors, in addition to Henry VIII of England.
+```
+
+```
+<|recipe|> Title: Microwave Souffle for Impatient People
+...
+Directions:
+1. Put all ingredients in a 1 1/2-quart bowl; microwave on High 4 minutes, stirring twice.
+2. Microwave, covered, for 2 minutes or until thickened, stirring twice.
+3. Let stand 5 minutes before serving.
 ```
