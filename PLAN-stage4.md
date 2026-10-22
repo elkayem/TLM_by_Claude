@@ -857,7 +857,24 @@ Sample ideas (the full pool gets written along with the app):
 
 ## Later / optional
 
-- **Validate the GPU time estimates for Stages 1–3** (the README table's
+- **DONE 2026-10-22: GPU benchmark** (`tools/benchmark_gpu.py`, results in
+  `~/tlm-data/gpu-benchmark.md`): Stage 1 in full, 173,220 tok/s, 4 min,
+  val 1.606 (CPU run 1.609); Stage 2, 2,000 steps, 89,258 tok/s → ~1.5 h
+  full run; Stage 3, 2,000 steps, 37,186 tok/s → ~4 h. 30×, 36×, 30× the
+  CPU; ~3.4 / 4.5 / 7.0 TFLOPS (Stage 4 ~9). Folded into the README.
+- **DONE 2026-10-22: training data and spare checkpoints removed** from
+  the dev machine (Larry: no plans to retrain; the data can be
+  re-downloaded, except that RecipeNLG may need its Hugging Face copy).
+  88.3 GB moved to `C:\TLM-cleanup` for Larry to delete: all of
+  `mixtape-raw`, the mixtape formatted text, token files and train.bin,
+  `mixtape-small`, the Stage 1-3 text and train.bin files, `instruct-ft`
+  data and checkpoint, the pilot/test/validation/old-run checkpoints,
+  every `latest.pt`, the mixtape snapshots and spare `.pt` files. Kept:
+  each stage's `best.pt` and logs, every `tokenizer.json`, the val files,
+  `stats.json`, `weights/`. Checked afterwards: all four stages generate
+  with `tlm.generate`, and the Mixtape app runs (README screenshot).
+  Retraining would need the prepare_* scripts re-run first.
+- (was:) **Validate the GPU time estimates for Stages 1–3** (the README table's
   † entries, added 2026-10-16). Do it once the GPU is free, i.e. after
   the mixtape run.
 

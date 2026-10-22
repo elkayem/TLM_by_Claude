@@ -17,7 +17,7 @@ commented well enough that I could understand the inner mechanics. -Larry
 | Tokenizer | character-level (65 tokens) | BPE, trained from scratch (4096) | new BPE (4096) + `<\|endoftext\|>` special token | new BPE (16,384) + `<\|endoftext\|>` + five genre tags |
 | Size | ~2.7M parameters | ~7.4M parameters | ~27M parameters | ~126M parameters |
 | Context | 256 tokens | 256 tokens | 512 tokens | 1,024 tokens |
-| Training time | 2 hours (CPU); ~10 minutes on the GPU (est.)† | 56 hours (CPU, the long weekend); ~2–3 hours on the GPU (est.)† | 118 hours (CPU, 5 days); ~4.5 hours on the GPU (est.)† | 109 hours (GPU, RTX 3050): 79,000 steps, then extended to 117,000 |
+| Training time | 2 hours (CPU); 4 minutes on the GPU† | 56 hours (CPU, the long weekend); ~1.5 hours on the GPU† | 118 hours (CPU, 5 days); ~4 hours on the GPU† | 109 hours (GPU, RTX 3050): 79,000 steps, then extended to 117,000 |
 | Best val loss | 1.609 | 1.595 | 1.257* | 2.565*‡ (2.586 before the extension) |
 | What you get | fake Shakespeare | coherent little children's stories | stories to order: give it a summary, required words, or features | articles, novels, reviews, recipes and stories on any premise — and deliberate genre collisions (a recipe for "The French Revolution") |
 
@@ -30,14 +30,21 @@ losses range from ~1.4 for recipes to ~3.2 for old books). The story of
 the run, including a loss spike and its repair, is in
 [docs/10-mixtape.md](docs/10-mixtape.md).
 
-† Estimates, not yet measured end to end (the CPU times are measured).
-Stage 3's comes from its 1,000-step GPU calibration run: 32,700 tok/s, or
-~6.2 TFLOPS sustained. Stages 1–2 scale that by the compute each token
-needs — ~20M and ~50M floating-point operations, against ~190M for Stage
-3 — and assume the GPU runs their narrower matrices less efficiently
-(~1.5–4 TFLOPS): small models can't keep a GPU fully busy. Checking them
-just means running each preset on the GPU; see "Later / optional" in
-PLAN-stage4.md.
+† Measured on an NVIDIA RTX 3050 (6 GB) with `tools/benchmark_gpu.py`.
+Stage 1 ran in full: 4 minutes, reaching a val loss of 1.606 against the
+CPU run's 1.609. Stages 2 and 3 ran 2,000 steps each, and the full-run
+time comes from their sustained speed (evals and samples included):
+
+| | tokens/s, CPU | tokens/s, GPU | speed-up | GPU work rate |
+|---|---|---|---|---|
+| Stage 1 (2.7M) | ~5,700 | 173,000 | 30× | ~3.4 TFLOPS |
+| Stage 2 (7.4M) | ~2,450 | 89,000 | 36× | ~4.5 TFLOPS |
+| Stage 3 (27M) | ~1,250 | 37,000 | 30× | ~7.0 TFLOPS |
+| Stage 4 (126M) | — | 9,700 | — | ~9 TFLOPS |
+
+The work rate (floating-point operations per second actually achieved)
+climbs with model size: small models' narrow matrices can't keep a GPU
+fully busy.
 
 Stage 1 is the fast feedback loop for learning the architecture. Stage 2 is
 the payoff: the TinyStories dataset was designed (Eldan & Li 2023) so that
@@ -55,8 +62,8 @@ app for playing with it.
 The Stage 1–3 numbers are measured results from the CPU of an Intel Core
 Ultra 7 265 (20 cores). The machine has since gained an NVIDIA RTX 3050
 (6 GB), and TLM now trains on it automatically when the CUDA build of
-PyTorch is installed. On the Stage 3 model it runs ~27× faster: 32,700 vs
-~1,250 tok/s, so the 5-day run becomes ~4.5 hours. Here's a sample from
+PyTorch is installed. On the Stage 3 model it runs ~30× faster: 37,000 vs
+~1,250 tok/s, so the 5-day run becomes ~4 hours. Here's a sample from
 the finished stories model:
 
 > Once upon a time, there was a little girl named Lily. She loved to play
@@ -214,7 +221,15 @@ compare against.
 
 A small desktop window for playing with the Stage 4 model: pick a genre,
 click one of four rotating ideas (or type your own), press Generate, and
-watch it write word by word. `python tools\make_shortcut.py` (run with the
+watch it write word by word.
+
+![The TLM Mixtape app: a 1-star review of a "Goldfish Treadmill", written by a self-described fish expert](docs/mixtape-app.png)
+
+*Asked for a 1-star review of a Goldfish Treadmill, the model wrote this
+in 3 seconds on the CPU. "I am a fish expert and have lived on fish for a
+year and a half."*
+
+Getting started: `python tools\make_shortcut.py` (run with the
 venv's python) puts a **TLM Mixtape** shortcut on the desktop — it asks
 Windows where the desktop is, which matters when OneDrive has moved it;
 re-run it if the repo or venv moves. Or start it with `python -m tlm.gui`
@@ -287,6 +302,8 @@ tlm/
 │   ├── add_qk_norm.py           graft QK-norm onto a trained checkpoint
 │   ├── sample_sheet.py          fixed-seed samples; blind A/B comparisons
 │   ├── plot_mixtape_run.py      draws docs/mixtape-run.svg
+│   ├── after_run.py             compare a finished run's model with a baseline
+│   ├── benchmark_gpu.py         measure Stages 1-3's GPU training speed
 │   ├── gpu_health.cmd/.ps1      GPU temperature/health log during a run
 │   ├── mixtape_status.ps1       one-shot health report of the Stage 4 run
 │   ├── make_shortcut.py         desktop shortcut for the app
